@@ -5,12 +5,11 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   Pencil,
-  Minus,
-  Plus,
 } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
 import { StockBadge } from "@/components/stock-badge";
+import { QuickAdjust } from "@/components/quick-adjust";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -26,12 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  getProduct,
-  getCategory,
-  getSupplier,
-  getProductMovements,
-} from "@/lib/mock-data";
+import { getProductDetail } from "@/lib/queries";
 import type { MovementType } from "@/lib/types";
 import { cn, formatCurrency, formatDateTime, formatNumber } from "@/lib/utils";
 
@@ -50,10 +44,10 @@ export default async function ProductDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const product = getProduct(id);
-  if (!product) notFound();
+  const detail = await getProductDetail(id);
+  if (!detail) notFound();
 
-  const movements = getProductMovements(product.id);
+  const { product, movements } = detail;
   const margin = product.sellPrice - product.costPrice;
   const marginPct =
     product.sellPrice > 0 ? (margin / product.sellPrice) * 100 : 0;
@@ -61,8 +55,8 @@ export default async function ProductDetailPage({
   const facts = [
     { label: "SKU", value: product.sku },
     { label: "Barcode", value: product.barcode ?? "—" },
-    { label: "Category", value: getCategory(product.categoryId)?.name ?? "—" },
-    { label: "Supplier", value: getSupplier(product.supplierId)?.name ?? "—" },
+    { label: "Category", value: product.categoryName ?? "—" },
+    { label: "Supplier", value: product.supplierName ?? "—" },
     { label: "Cost price", value: formatCurrency(product.costPrice) },
     { label: "Sell price", value: formatCurrency(product.sellPrice) },
     {
@@ -95,7 +89,7 @@ export default async function ProductDetailPage({
           <CardContent>
             <div className="flex items-end justify-between">
               <div className="text-4xl font-semibold tabular-nums">
-                {formatNumber(product.quantityOnHand)}
+                <span data-testid="qoh">{formatNumber(product.quantityOnHand)}</span>
                 <span className="ml-1 text-base font-normal text-muted-foreground">
                   {product.unit}
                 </span>
@@ -104,22 +98,7 @@ export default async function ProductDetailPage({
             </div>
 
             <div className="mt-6">
-              <p className="mb-2 text-sm font-medium">Quick adjust</p>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="icon" aria-label="Decrease">
-                  <Minus />
-                </Button>
-                <div className="flex h-9 flex-1 items-center justify-center rounded-md border bg-muted/40 text-sm text-muted-foreground">
-                  Record movement
-                </div>
-                <Button variant="outline" size="icon" aria-label="Increase">
-                  <Plus />
-                </Button>
-              </div>
-              <p className="mt-2 text-xs text-muted-foreground">
-                Adjustments create a stock movement — quantity is never edited
-                directly.
-              </p>
+              <QuickAdjust productId={product.id} />
             </div>
           </CardContent>
         </Card>

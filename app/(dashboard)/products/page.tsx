@@ -15,8 +15,7 @@ import {
 } from "@/components/ui/table";
 import { ProductSearch } from "@/components/product-search";
 import { CategoryFilter } from "@/components/category-filter";
-import { products, categories, getCategory, getSupplier } from "@/lib/mock-data";
-import { stockStatus } from "@/lib/types";
+import { getProducts, getCategories, getActiveProductCount } from "@/lib/queries";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 
 export default async function ProductsPage({
@@ -25,20 +24,11 @@ export default async function ProductsPage({
   searchParams: Promise<{ q?: string; category?: string; filter?: string }>;
 }) {
   const { q = "", category = "", filter = "" } = await searchParams;
-  const query = q.trim().toLowerCase();
-
-  let rows = products.filter((p) => p.isActive);
-  if (query) {
-    rows = rows.filter(
-      (p) =>
-        p.name.toLowerCase().includes(query) ||
-        p.sku.toLowerCase().includes(query) ||
-        (p.barcode ?? "").includes(query),
-    );
-  }
-  if (category) rows = rows.filter((p) => p.categoryId === category);
-  if (filter === "low")
-    rows = rows.filter((p) => stockStatus(p) !== "in_stock");
+  const [rows, categories, total] = await Promise.all([
+    getProducts({ q, category, filter }),
+    getCategories(),
+    getActiveProductCount(),
+  ]);
 
   return (
     <div>
@@ -100,10 +90,10 @@ export default async function ProductsPage({
                       </div>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {getCategory(p.categoryId)?.name ?? "—"}
+                      {p.categoryName ?? "—"}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {getSupplier(p.supplierId)?.name ?? "—"}
+                      {p.supplierName ?? "—"}
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground">
                       {formatCurrency(p.costPrice)}
@@ -129,8 +119,7 @@ export default async function ProductsPage({
       </Card>
 
       <p className="mt-3 text-xs text-muted-foreground">
-        Showing {formatNumber(rows.length)} of{" "}
-        {formatNumber(products.filter((p) => p.isActive).length)} products
+        Showing {formatNumber(rows.length)} of {formatNumber(total)} products
       </p>
     </div>
   );

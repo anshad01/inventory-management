@@ -14,10 +14,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { products, getProduct, getRecentMovements } from "@/lib/mock-data";
-import { stockStatus } from "@/lib/types";
+import { getDashboardData } from "@/lib/queries";
 import type { MovementType } from "@/lib/types";
 import { cn, formatCurrency, formatDateTime, formatNumber } from "@/lib/utils";
+
+export const dynamic = "force-dynamic";
 
 const movementMeta: Record<
   MovementType,
@@ -28,16 +29,8 @@ const movementMeta: Record<
   ADJUSTMENT: { label: "Adjustment", icon: Pencil, className: "text-muted-foreground" },
 };
 
-export default function DashboardPage() {
-  const active = products.filter((p) => p.isActive);
-  const stockValue = active.reduce(
-    (sum, p) => sum + p.quantityOnHand * p.costPrice,
-    0,
-  );
-  const lowStock = active.filter((p) => stockStatus(p) === "low_stock");
-  const outOfStock = active.filter((p) => stockStatus(p) === "out_of_stock");
-  const attention = [...outOfStock, ...lowStock].slice(0, 6);
-  const recent = getRecentMovements(6);
+export default async function DashboardPage() {
+  const data = await getDashboardData();
 
   return (
     <div>
@@ -53,27 +46,27 @@ export default function DashboardPage() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Active products"
-          value={formatNumber(active.length)}
+          value={formatNumber(data.activeCount)}
           hint="In your catalog"
           icon={Package}
         />
         <StatCard
           label="Stock value"
-          value={formatCurrency(stockValue)}
+          value={formatCurrency(data.stockValue)}
           hint="At cost price"
           icon={DollarSign}
           tone="success"
         />
         <StatCard
           label="Low stock"
-          value={formatNumber(lowStock.length)}
+          value={formatNumber(data.lowStockCount)}
           hint="At or below reorder point"
           icon={AlertTriangle}
           tone="warning"
         />
         <StatCard
           label="Out of stock"
-          value={formatNumber(outOfStock.length)}
+          value={formatNumber(data.outOfStockCount)}
           hint="Needs restocking"
           icon={XCircle}
           tone="destructive"
@@ -90,42 +83,48 @@ export default function DashboardPage() {
             </Button>
           </CardHeader>
           <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Product</TableHead>
-                  <TableHead className="text-right">On hand</TableHead>
-                  <TableHead className="text-right">Reorder at</TableHead>
-                  <TableHead className="text-right">Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {attention.map((p) => (
-                  <TableRow key={p.id}>
-                    <TableCell>
-                      <Link
-                        href={`/products/${p.id}`}
-                        className="font-medium hover:underline"
-                      >
-                        {p.name}
-                      </Link>
-                      <div className="text-xs text-muted-foreground">
-                        {p.sku}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {formatNumber(p.quantityOnHand)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums text-muted-foreground">
-                      {formatNumber(p.reorderPoint)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <StockBadge product={p} />
-                    </TableCell>
+            {data.attention.length === 0 ? (
+              <p className="px-6 py-10 text-center text-sm text-muted-foreground">
+                Everything is well stocked. 🎉
+              </p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Product</TableHead>
+                    <TableHead className="text-right">On hand</TableHead>
+                    <TableHead className="text-right">Reorder at</TableHead>
+                    <TableHead className="text-right">Status</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {data.attention.map((p) => (
+                    <TableRow key={p.id}>
+                      <TableCell>
+                        <Link
+                          href={`/products/${p.id}`}
+                          className="font-medium hover:underline"
+                        >
+                          {p.name}
+                        </Link>
+                        <div className="text-xs text-muted-foreground">
+                          {p.sku}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatNumber(p.quantityOnHand)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-muted-foreground">
+                        {formatNumber(p.reorderPoint)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <StockBadge product={p} />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </CardContent>
         </Card>
 
@@ -135,8 +134,7 @@ export default function DashboardPage() {
             <CardTitle>Recent activity</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-1">
-            {recent.map((m) => {
-              const product = getProduct(m.productId);
+            {data.recent.map((m) => {
               const meta = movementMeta[m.type];
               const Icon = meta.icon;
               return (
@@ -154,7 +152,7 @@ export default function DashboardPage() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium">
-                      {product?.name ?? "Unknown product"}
+                      {m.productName}
                     </p>
                     <p className="text-xs text-muted-foreground">
                       {meta.label} · {m.createdBy} · {formatDateTime(m.createdAt)}

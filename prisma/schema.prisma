@@ -1,0 +1,199 @@
+// Prisma schema for the Inventory app — models mirror SPEC.md §3.
+// Datasource is local Postgres in development; the same schema deploys to
+// Supabase Postgres by changing DATABASE_URL only (see SPEC.md §9, M5).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  STAFF
+  VIEWER
+}
+
+enum MovementType {
+  PURCHASE_IN
+  SALE_OUT
+  ADJUSTMENT
+}
+
+enum ReferenceType {
+  PURCHASE_ORDER
+  SALE
+  MANUAL
+}
+
+enum POStatus {
+  DRAFT
+  ORDERED
+  RECEIVED
+  CANCELLED
+}
+
+enum SaleStatus {
+  COMPLETED
+  VOIDED
+}
+
+enum ShareScope {
+  FULL_INVENTORY
+  LOW_STOCK
+  CATEGORY
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         Role     @default(STAFF)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  movements      StockMovement[]
+  purchaseOrders PurchaseOrder[]
+  sales          Sale[]
+  shareLinks     ShareLink[]
+}
+
+model Category {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  description String?
+  createdAt   DateTime  @default(now())
+  products    Product[]
+}
+
+model Supplier {
+  id        String    @id @default(uuid())
+  name      String
+  email     String?
+  phone     String?
+  address   String?
+  notes     String?
+  createdAt DateTime  @default(now())
+
+  products       Product[]
+  purchaseOrders PurchaseOrder[]
+}
+
+model Product {
+  id             String   @id @default(uuid())
+  sku            String   @unique
+  barcode        String?  @unique
+  name           String
+  description    String?
+  categoryId     String?
+  supplierId     String?
+  costPrice      Decimal  @default(0) @db.Decimal(12, 2)
+  sellPrice      Decimal  @default(0) @db.Decimal(12, 2)
+  quantityOnHand Int      @default(0)
+  reorderPoint   Int      @default(0)
+  reorderQty     Int?
+  unit           String   @default("pcs")
+  isActive       Boolean  @default(true)
+  imageUrl       String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  category  Category? @relation(fields: [categoryId], references: [id])
+  supplier  Supplier? @relation(fields: [supplierId], references: [id])
+  movements StockMovement[]
+  poItems   PurchaseOrderItem[]
+  saleItems SaleItem[]
+
+  @@index([categoryId])
+  @@index([supplierId])
+}
+
+model StockMovement {
+  id            String         @id @default(uuid())
+  productId     String
+  type          MovementType
+  quantity      Int // signed: + adds stock, - removes
+  reason        String?
+  referenceType ReferenceType?
+  referenceId   String?
+  unitCost      Decimal?       @db.Decimal(12, 2)
+  createdById   String?
+  createdAt     DateTime       @default(now())
+
+  product   Product @relation(fields: [productId], references: [id])
+  createdBy User?   @relation(fields: [createdById], references: [id])
+
+  @@index([productId])
+  @@index([createdAt])
+}
+
+model PurchaseOrder {
+  id          String    @id @default(uuid())
+  poNumber    String    @unique
+  supplierId  String
+  status      POStatus  @default(DRAFT)
+  orderedAt   DateTime?
+  receivedAt  DateTime?
+  notes       String?
+  createdById String?
+  createdAt   DateTime  @default(now())
+
+  supplier  Supplier            @relation(fields: [supplierId], references: [id])
+  createdBy User?               @relation(fields: [createdById], references: [id])
+  items     PurchaseOrderItem[]
+}
+
+model PurchaseOrderItem {
+  id        String  @id @default(uuid())
+  poId      String
+  productId String
+  quantity  Int
+  unitCost  Decimal @db.Decimal(12, 2)
+
+  purchaseOrder PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
+  product       Product       @relation(fields: [productId], references: [id])
+}
+
+model Sale {
+  id           String     @id @default(uuid())
+  saleNumber   String     @unique
+  customerName String?
+  status       SaleStatus @default(COMPLETED)
+  soldAt       DateTime   @default(now())
+  notes        String?
+  createdById  String?
+  createdAt    DateTime   @default(now())
+
+  createdBy User?      @relation(fields: [createdById], references: [id])
+  items     SaleItem[]
+}
+
+model SaleItem {
+  id        String  @id @default(uuid())
+  saleId    String
+  productId String
+  quantity  Int
+  unitPrice Decimal @db.Decimal(12, 2)
+
+  sale    Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+}
+
+model ShareLink {
+  id          String     @id @default(uuid())
+  token       String     @unique
+  title       String
+  scope       ShareScope @default(FULL_INVENTORY)
+  categoryId  String?
+  expiresAt   DateTime?
+  isActive    Boolean    @default(true)
+  createdById String?
+  createdAt   DateTime   @default(now())
+
+  createdBy User? @relation(fields: [createdById], references: [id])
+}

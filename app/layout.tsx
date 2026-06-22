@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Inventory — Stock Management",
   description:
-    "Track products, stock levels, suppliers, and movements for your shop.",
+    "Track products, stock levels, suppliers, and movements for your computer peripherals store.",
 };
 
 export default function RootLayout({

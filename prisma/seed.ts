@@ -11,12 +11,25 @@ const DEMO_PASSWORD = "password123";
 // development data (replaces the earlier in-memory mock layer).
 
 const users = [
-  { id: "u_priya", email: "priya@inventory.example", name: "Priya Anand", type: "STAFF" as const, role: "ADMIN" as const, supplierId: null },
-  { id: "u_sam", email: "sam@inventory.example", name: "Sam Lee", type: "STAFF" as const, role: "STAFF" as const, supplierId: null },
-  { id: "u_vee", email: "viewer@inventory.example", name: "Vee Viewer", type: "STAFF" as const, role: "VIEWER" as const, supplierId: null },
-  { id: "u_supplier", email: "supplier@techsource.example", name: "Taylor (TechSource)", type: "SUPPLIER" as const, role: "VIEWER" as const, supplierId: "sup_techsource" },
-  { id: "u_customer", email: "customer@example.com", name: "Jordan Smith", type: "CUSTOMER" as const, role: "VIEWER" as const, supplierId: null },
+  { id: "u_priya", email: "priya@inventory.example", name: "Priya Anand", type: "STAFF" as const, role: "ADMIN" as const, supplierId: null, isApproved: true },
+  { id: "u_sam", email: "sam@inventory.example", name: "Sam Lee", type: "STAFF" as const, role: "STAFF" as const, supplierId: null, isApproved: true },
+  { id: "u_vee", email: "viewer@inventory.example", name: "Vee Viewer", type: "STAFF" as const, role: "VIEWER" as const, supplierId: null, isApproved: true },
+  { id: "u_supplier", email: "supplier@techsource.example", name: "Taylor (TechSource)", type: "SUPPLIER" as const, role: "VIEWER" as const, supplierId: "sup_techsource", isApproved: true },
+  { id: "u_supplier2", email: "newsupplier@pericore.example", name: "Robin (PeriCore)", type: "SUPPLIER" as const, role: "VIEWER" as const, supplierId: "sup_pericore", isApproved: false },
+  { id: "u_customer", email: "customer@example.com", name: "Jordan Smith", type: "CUSTOMER" as const, role: "VIEWER" as const, supplierId: null, isApproved: true },
 ];
+
+// Each product picks up a relevant placeholder image based on its category.
+const categoryImage: Record<string, string> = {
+  cat_keyboards: "/img/categories/keyboards.svg",
+  cat_mice: "/img/categories/mice.svg",
+  cat_monitors: "/img/categories/monitors.svg",
+  cat_audio: "/img/categories/headsets.svg",
+  cat_webcams: "/img/categories/webcams.svg",
+  cat_storage: "/img/categories/storage.svg",
+  cat_cables: "/img/categories/cables.svg",
+  cat_docks: "/img/categories/docks.svg",
+};
 
 const categories = [
   { id: "cat_keyboards", name: "Keyboards" },
@@ -66,6 +79,7 @@ const movements = [
 
 async function main() {
   // Clear in dependency order so the seed is idempotent.
+  await prisma.notification.deleteMany();
   await prisma.stockMovement.deleteMany();
   await prisma.saleItem.deleteMany();
   await prisma.sale.deleteMany();
@@ -86,7 +100,12 @@ async function main() {
     await prisma.user.create({ data: { ...u, passwordHash } });
   }
 
-  await prisma.product.createMany({ data: products });
+  await prisma.product.createMany({
+    data: products.map((p) => ({
+      ...p,
+      imageUrl: categoryImage[p.categoryId] ?? "/img/categories/placeholder.svg",
+    })),
+  });
   await prisma.stockMovement.createMany({ data: movements });
 
   console.log(

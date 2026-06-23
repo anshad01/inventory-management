@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/db";
 import { applyMovement, nextDocNumber } from "@/lib/services/stock";
+import { notify, notifyLowStock } from "@/lib/services/notify";
 import { requireCustomer } from "@/lib/auth/session";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 type CartLine = { id: string; qty: number };
 
@@ -16,6 +18,11 @@ export type CheckoutResult =
  * that draw down stock). Prices are taken from the DB, not the client. */
 export async function checkout(lines: CartLine[]): Promise<CheckoutResult> {
   const user = await requireCustomer();
+
+  // Basic abuse guard: cap checkout attempts per customer.
+  if (!checkRateLimit(`checkout:${user.id}`, 10, 60_000)) {
+    return { ok: false, error: "Too many attempts. Please wait a moment and try again." };
+  }
 
   const wanted = lines
     .map((l) => ({ id: String(l.id), qty: Math.max(0, Math.floor(Number(l.qty) || 0)) }))
@@ -37,7 +44,7 @@ export async function checkout(lines: CartLine[]): Promise<CheckoutResult> {
           saleNumber,
           customerName: user.name,
           customerUserId: user.id,
-          status: "COMPLETED",
+          status: "PENDING",
           createdById: user.id,
           items: {
             create: wanted.map((w) => ({
@@ -58,6 +65,21 @@ export async function checkout(lines: CartLine[]): Promise<CheckoutResult> {
           referenceType: "SALE",
           referenceId: sale.id,
           createdById: user.id,
+        });
+        await notifyLowStock(tx, w.id);
+      }
+
+      // Let staff know a new order needs fulfilment.
+      const staff = await tx.user.findMany({
+        where: { type: "STAFF", isActive: true },
+        select: { id: true },
+      });
+      for (const s of staff) {
+        await notify(tx, {
+          userId: s.id,
+          type: "ORDER_STATUS",
+          message: `New order ${saleNumber} from ${user.name} needs review.`,
+          href: `/sales/${sale.id}`,
         });
       }
       return sale.id;

@@ -23,6 +23,7 @@ export type SessionUser = {
   type: AccountType;
   role: "ADMIN" | "STAFF" | "VIEWER";
   supplierId: string | null;
+  isApproved: boolean;
 };
 
 /** Where each account type lands after login. */
@@ -89,6 +90,7 @@ export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
       role: true,
       supplierId: true,
       isActive: true,
+      isApproved: true,
     },
   });
   if (!user || !user.isActive) return null;
@@ -99,6 +101,7 @@ export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
     type: user.type,
     role: user.role,
     supplierId: user.supplierId,
+    isApproved: user.isApproved,
   };
 });
 
@@ -113,6 +116,15 @@ export async function requireUser(): Promise<SessionUser> {
 export async function requireStaff(): Promise<SessionUser> {
   const user = await requireUser();
   if (user.type !== "STAFF") redirect(homePathForType(user.type));
+  return user;
+}
+
+/** Require a STAFF account with the ADMIN role. Non-admin staff are sent to the
+ * dashboard home; other account types to their own area. */
+export async function requireAdmin(): Promise<SessionUser> {
+  const user = await requireUser();
+  if (user.type !== "STAFF") redirect(homePathForType(user.type));
+  if (user.role !== "ADMIN") redirect("/");
   return user;
 }
 
@@ -152,4 +164,36 @@ export async function checkWriter(): Promise<
     return { error: "Your account cannot perform this action." };
   }
   return { user };
+}
+
+// Who may manage products: STAFF writers (any supplier) and approved SUPPLIER
+// accounts (scoped to their own supplier). `supplierScope` is non-null for
+// suppliers — every product they touch is forced to that supplier id.
+export type ProductManager = {
+  user: SessionUser;
+  supplierScope: string | null;
+};
+
+export async function checkProductManager(): Promise<
+  ProductManager | { error: string }
+> {
+  const user = await getCurrentUser();
+  if (!user) return { error: "You are not signed in." };
+
+  if (user.type === "STAFF") {
+    if (user.role === "VIEWER") {
+      return { error: "Your account cannot perform this action." };
+    }
+    return { user, supplierScope: null };
+  }
+
+  if (user.type === "SUPPLIER") {
+    if (!user.supplierId) return { error: "Your account is not linked to a supplier." };
+    if (!user.isApproved) {
+      return { error: "Your supplier account is awaiting admin approval." };
+    }
+    return { user, supplierScope: user.supplierId };
+  }
+
+  return { error: "Your account cannot perform this action." };
 }

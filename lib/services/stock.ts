@@ -15,34 +15,55 @@ export type MovementInput = {
 };
 
 /**
- * Apply a single stock movement inside an existing transaction: record the
- * StockMovement and update the cached Product.quantityOnHand. Rejects changes
- * that would drive quantity below zero (no negative stock, SPEC §4).
- * Returns the new on-hand quantity.
+ * Apply a single stock movement inside an existing transaction: update the
+ * cached Product.quantityOnHand and record the StockMovement. Returns the new
+ * on-hand quantity.
+ *
+ * Stock changes are applied with a single atomic conditional UPDATE rather than
+ * read-then-write, so concurrent orders cannot oversell or drive quantity below
+ * zero (no negative stock, SPEC §4). For a decrement we guard with
+ * `quantityOnHand >= |delta|` in the WHERE clause: if the row no longer
+ * qualifies (another transaction got there first) the update matches zero rows
+ * and we reject — there is no lost-update window.
  */
 export async function applyMovement(
   tx: Tx,
   input: MovementInput,
 ): Promise<number> {
-  const product = await tx.product.findUnique({
-    where: { id: input.productId },
-    select: { quantityOnHand: true, name: true },
-  });
-  if (!product) throw new Error("Product not found.");
+  const delta = input.quantity;
 
-  const next = product.quantityOnHand + input.quantity;
-  if (next < 0) {
-    throw new Error(
-      `Not enough stock for ${product.name}: ${product.quantityOnHand} on hand, ` +
-        `cannot remove ${Math.abs(input.quantity)}.`,
-    );
+  if (delta < 0) {
+    const need = -delta;
+    const res = await tx.product.updateMany({
+      where: { id: input.productId, quantityOnHand: { gte: need } },
+      data: { quantityOnHand: { decrement: need } },
+    });
+    if (res.count === 0) {
+      // Either the product is gone or there isn't enough stock. Read it back to
+      // produce a precise, user-facing error message.
+      const product = await tx.product.findUnique({
+        where: { id: input.productId },
+        select: { quantityOnHand: true, name: true },
+      });
+      if (!product) throw new Error("Product not found.");
+      throw new Error(
+        `Not enough stock for ${product.name}: ${product.quantityOnHand} on hand, ` +
+          `cannot remove ${need}.`,
+      );
+    }
+  } else if (delta > 0) {
+    const res = await tx.product.updateMany({
+      where: { id: input.productId },
+      data: { quantityOnHand: { increment: delta } },
+    });
+    if (res.count === 0) throw new Error("Product not found.");
   }
 
   await tx.stockMovement.create({
     data: {
       productId: input.productId,
       type: input.type,
-      quantity: input.quantity,
+      quantity: delta,
       reason: input.reason ?? null,
       referenceType: input.referenceType ?? null,
       referenceId: input.referenceId ?? null,
@@ -51,12 +72,11 @@ export async function applyMovement(
     },
   });
 
-  await tx.product.update({
+  const after = await tx.product.findUnique({
     where: { id: input.productId },
-    data: { quantityOnHand: next },
+    select: { quantityOnHand: true },
   });
-
-  return next;
+  return after?.quantityOnHand ?? 0;
 }
 
 /** Generate the next sequential document number, e.g. PO-0007 / SALE-0012. */

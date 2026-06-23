@@ -5,7 +5,14 @@ import { redirect } from "next/navigation";
 
 import { prisma } from "@/lib/db";
 import { applyMovement, nextDocNumber } from "@/lib/services/stock";
-import { checkWriter, requireWriter } from "@/lib/auth/session";
+import { notify, notifyLowStock } from "@/lib/services/notify";
+import { checkWriter, getCurrentUser, requireWriter } from "@/lib/auth/session";
+import {
+  ORDER_STATUS_LABELS,
+  canTransition,
+  cancelRestoresStock,
+  type SaleStatus,
+} from "@/lib/orders";
 import type { ActionResult } from "@/lib/types";
 
 type LineItem = { productId: string; quantity: number; unitPrice: number };
@@ -29,7 +36,8 @@ function parseItems(raw: string): LineItem[] {
   return items;
 }
 
-/** Record a completed sale: SALE_OUT movements that draw down stock. */
+/** Record an in-store sale made by staff: SALE_OUT movements that draw down
+ * stock. These are completed at the counter, so they land as DELIVERED. */
 export async function createSale(formData: FormData) {
   const actor = await requireWriter();
   const customerName = String(formData.get("customerName") ?? "").trim() || null;
@@ -44,7 +52,7 @@ export async function createSale(formData: FormData) {
         saleNumber,
         customerName,
         notes,
-        status: "COMPLETED",
+        status: "DELIVERED",
         createdById: actor.id,
         items: {
           create: items.map((i) => ({
@@ -66,6 +74,7 @@ export async function createSale(formData: FormData) {
         referenceId: created.id,
         createdById: actor.id,
       });
+      await notifyLowStock(tx, item.productId);
     }
     return created;
   });
@@ -77,41 +86,119 @@ export async function createSale(formData: FormData) {
   redirect(`/sales/${sale.id}`);
 }
 
-/** Void a sale: reverse its SALE_OUT movements (returns stock) without deleting
- * history. Creates compensating PURCHASE_IN-style adjustments. */
-export async function voidSale(id: string): Promise<ActionResult> {
+/** Advance a customer order to the next state (CONFIRMED / SHIPPED / DELIVERED).
+ * Staff-only. Invalid transitions are rejected and the customer is notified. */
+export async function advanceOrder(
+  id: string,
+  to: SaleStatus,
+): Promise<ActionResult> {
   const auth = await checkWriter();
   if ("error" in auth) return { ok: false, error: auth.error };
+  if (to === "CANCELLED") return cancelOrder(id);
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const sale = await tx.sale.findUnique({
+        where: { id },
+        select: { id: true, status: true, saleNumber: true, customerUserId: true },
+      });
+      if (!sale) throw new Error("Order not found.");
+      const from = sale.status as SaleStatus;
+      if (!canTransition(from, to)) {
+        throw new Error(
+          `Cannot move order from ${ORDER_STATUS_LABELS[from]} to ${ORDER_STATUS_LABELS[to]}.`,
+        );
+      }
+      await tx.sale.update({ where: { id }, data: { status: to } });
+      if (sale.customerUserId) {
+        await notify(tx, {
+          userId: sale.customerUserId,
+          type: "ORDER_STATUS",
+          message: `Order ${sale.saleNumber} is now ${ORDER_STATUS_LABELS[to].toLowerCase()}.`,
+          href: `/shop/orders/${id}`,
+        });
+      }
+    });
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed." };
+  }
+  revalidatePaths(id);
+  return { ok: true };
+}
+
+/** Cancel a customer order. Staff may cancel any order that is still
+ * PENDING/CONFIRMED; a customer may cancel their own order while it is PENDING.
+ * Cancelling restores the reserved stock (SPEC §5). */
+export async function cancelOrder(id: string): Promise<ActionResult> {
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You are not signed in." };
+  const isStaffWriter = user.type === "STAFF" && user.role !== "VIEWER";
+
   try {
     await prisma.$transaction(async (tx) => {
       const sale = await tx.sale.findUnique({
         where: { id },
         include: { items: true },
       });
-      if (!sale) throw new Error("Sale not found.");
-      if (sale.status === "VOIDED") throw new Error("This sale is already voided.");
+      if (!sale) throw new Error("Order not found.");
 
-      for (const item of sale.items) {
-        await applyMovement(tx, {
-          productId: item.productId,
-          type: "ADJUSTMENT",
-          quantity: Math.abs(item.quantity),
-          reason: `Void ${sale.saleNumber}`,
-          referenceType: "SALE",
-          referenceId: sale.id,
-          createdById: auth.user.id,
-        });
+      // Authorization: staff writer, or the owning customer.
+      const isOwner =
+        user.type === "CUSTOMER" && sale.customerUserId === user.id;
+      if (!isStaffWriter && !isOwner) {
+        throw new Error("You cannot cancel this order.");
       }
 
-      await tx.sale.update({ where: { id }, data: { status: "VOIDED" } });
+      const from = sale.status as SaleStatus;
+      if (!canTransition(from, "CANCELLED")) {
+        throw new Error(
+          `An order that is ${ORDER_STATUS_LABELS[from].toLowerCase()} can no longer be cancelled.`,
+        );
+      }
+      // Customers may only cancel while still pending.
+      if (isOwner && !isStaffWriter && from !== "PENDING") {
+        throw new Error("This order can no longer be cancelled. Contact support.");
+      }
+
+      if (cancelRestoresStock(from)) {
+        for (const item of sale.items) {
+          await applyMovement(tx, {
+            productId: item.productId,
+            type: "ADJUSTMENT",
+            quantity: Math.abs(item.quantity),
+            reason: `Cancelled ${sale.saleNumber}`,
+            referenceType: "SALE",
+            referenceId: sale.id,
+            createdById: user.id,
+          });
+        }
+      }
+
+      await tx.sale.update({ where: { id }, data: { status: "CANCELLED" } });
+
+      // Notify the customer if staff cancelled on their behalf.
+      if (sale.customerUserId && sale.customerUserId !== user.id) {
+        await notify(tx, {
+          userId: sale.customerUserId,
+          type: "ORDER_STATUS",
+          message: `Order ${sale.saleNumber} was cancelled.`,
+          href: `/shop/orders/${id}`,
+        });
+      }
     });
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Failed." };
   }
+  revalidatePaths(id);
+  revalidatePath(`/shop/orders/${id}`);
+  revalidatePath("/shop/orders");
+  return { ok: true };
+}
+
+function revalidatePaths(id: string) {
   revalidatePath(`/sales/${id}`);
   revalidatePath("/sales");
   revalidatePath("/products");
   revalidatePath("/products/[id]", "page");
   revalidatePath("/");
-  return { ok: true };
 }

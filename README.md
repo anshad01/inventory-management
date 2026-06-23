@@ -50,8 +50,20 @@ Useful scripts: `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm db:studio`.
 
 The same schema runs on a managed Postgres (e.g. **Supabase**) — only
 `DATABASE_URL` changes. Deploy the app to **Vercel**, point `DATABASE_URL` at the
-managed database, run the migration against it, and (optionally) seed. See
-SPEC §2 and §9 (M5).
+managed database, run the migration against it, and (optionally) seed.
+
+**→ See [`DEPLOYMENT.md`](./DEPLOYMENT.md) for the full step-by-step guide**
+(Supabase + Vercel, env vars, migrations, and verification). Summary:
+
+1. Create a Supabase project; copy its **direct** (5432) and **pooler** (6543)
+   connection strings.
+2. Run `prisma migrate deploy` against the direct URL (optionally `prisma db
+   seed`).
+3. Import the repo into Vercel and set `DATABASE_URL` (pooler URL), `AUTH_SECRET`,
+   and `NEXT_PUBLIC_APP_URL`.
+4. Deploy, then sign in and create a public `/s/:token` share link.
+
+See also SPEC §2 and §9 (M5).
 
 ## Project structure
 

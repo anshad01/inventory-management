@@ -93,9 +93,9 @@ stale Prisma Client.)
 
    | Name | Value | Notes |
    |------|-------|-------|
-   | `DATABASE_URL` | the **pooler** URI (port 6543) + `?pgbouncer=true&connection_limit=1` | runtime DB connection |
-   | `AUTH_SECRET` | output of `openssl rand -base64 32` | signs the session cookie |
-   | `NEXT_PUBLIC_APP_URL` | `https://<your-app>.vercel.app` | used to build share-link URLs |
+   | `DATABASE_URL` | the **pooler** URI (port 6543) + `?pgbouncer=true&connection_limit=1` | runtime DB connection — **required** |
+   | `AUTH_SECRET` | output of `openssl rand -base64 32` | signs the session cookie — **required** |
+   | `NEXT_PUBLIC_APP_URL` | `https://<your-app>.vercel.app` | optional — share links already use the browser's origin |
 
    Example `DATABASE_URL`:
    ```

@@ -17,6 +17,12 @@ enum Role {
   VIEWER
 }
 
+enum AccountType {
+  STAFF
+  SUPPLIER
+  CUSTOMER
+}
+
 enum MovementType {
   PURCHASE_IN
   SALE_OUT
@@ -48,19 +54,26 @@ enum ShareScope {
 }
 
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
+  id           String      @id @default(uuid())
+  email        String      @unique
   passwordHash String
   name         String
-  role         Role     @default(STAFF)
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  type         AccountType @default(STAFF)
+  role         Role        @default(STAFF) // applies to STAFF accounts
+  phone        String?
+  supplierId   String? // set for SUPPLIER accounts
+  isActive     Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
 
+  supplier       Supplier?       @relation(fields: [supplierId], references: [id])
   movements      StockMovement[]
   purchaseOrders PurchaseOrder[]
-  sales          Sale[]
+  sales          Sale[]          @relation("SaleCreatedBy")
+  orders         Sale[]          @relation("SaleCustomer")
   shareLinks     ShareLink[]
+
+  @@index([supplierId])
 }
 
 model Category {
@@ -82,6 +95,7 @@ model Supplier {
 
   products       Product[]
   purchaseOrders PurchaseOrder[]
+  users          User[]
 }
 
 model Product {
@@ -160,17 +174,21 @@ model PurchaseOrderItem {
 }
 
 model Sale {
-  id           String     @id @default(uuid())
-  saleNumber   String     @unique
-  customerName String?
-  status       SaleStatus @default(COMPLETED)
-  soldAt       DateTime   @default(now())
-  notes        String?
-  createdById  String?
-  createdAt    DateTime   @default(now())
+  id             String     @id @default(uuid())
+  saleNumber     String     @unique
+  customerName   String?
+  customerUserId String? // set when placed by a logged-in customer
+  status         SaleStatus @default(COMPLETED)
+  soldAt         DateTime   @default(now())
+  notes          String?
+  createdById    String?
+  createdAt      DateTime   @default(now())
 
-  createdBy User?      @relation(fields: [createdById], references: [id])
+  createdBy User?      @relation("SaleCreatedBy", fields: [createdById], references: [id])
+  customer  User?      @relation("SaleCustomer", fields: [customerUserId], references: [id])
   items     SaleItem[]
+
+  @@index([customerUserId])
 }
 
 model SaleItem {

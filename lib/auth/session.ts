@@ -14,12 +14,23 @@ const COOKIE = "session";
 const MAX_AGE = 60 * 60 * 24 * 7; // 7 days
 const secret = process.env.AUTH_SECRET || "dev-insecure-secret-change-me";
 
+export type AccountType = "STAFF" | "SUPPLIER" | "CUSTOMER";
+
 export type SessionUser = {
   id: string;
   name: string;
   email: string;
+  type: AccountType;
   role: "ADMIN" | "STAFF" | "VIEWER";
+  supplierId: string | null;
 };
+
+/** Where each account type lands after login. */
+export function homePathForType(type: AccountType): string {
+  if (type === "SUPPLIER") return "/portal";
+  if (type === "CUSTOMER") return "/shop";
+  return "/";
+}
 
 function sign(userId: string): string {
   const payload = Buffer.from(JSON.stringify({ uid: userId })).toString(
@@ -70,10 +81,25 @@ export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
   if (!uid) return null;
   const user = await prisma.user.findUnique({
     where: { id: uid },
-    select: { id: true, name: true, email: true, role: true, isActive: true },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      type: true,
+      role: true,
+      supplierId: true,
+      isActive: true,
+    },
   });
   if (!user || !user.isActive) return null;
-  return { id: user.id, name: user.name, email: user.email, role: user.role };
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    type: user.type,
+    role: user.role,
+    supplierId: user.supplierId,
+  };
 });
 
 /** Require an authenticated user; redirect to /login otherwise. */
@@ -83,12 +109,35 @@ export async function requireUser(): Promise<SessionUser> {
   return user;
 }
 
-/** Require a user who can write (ADMIN or STAFF). Throws for VIEWER. Use in
+/** Require a STAFF account; send other account types to their own home. */
+export async function requireStaff(): Promise<SessionUser> {
+  const user = await requireUser();
+  if (user.type !== "STAFF") redirect(homePathForType(user.type));
+  return user;
+}
+
+/** Require a SUPPLIER account (with a linked supplier). */
+export async function requireSupplier(): Promise<SessionUser> {
+  const user = await requireUser();
+  if (user.type !== "SUPPLIER" || !user.supplierId) {
+    redirect(homePathForType(user.type));
+  }
+  return user;
+}
+
+/** Require a CUSTOMER account. */
+export async function requireCustomer(): Promise<SessionUser> {
+  const user = await requireUser();
+  if (user.type !== "CUSTOMER") redirect(homePathForType(user.type));
+  return user;
+}
+
+/** Require a staff user who can write (ADMIN or STAFF role, not VIEWER). Use in
  * form actions that redirect on success. */
 export async function requireWriter(): Promise<SessionUser> {
   const user = await requireUser();
-  if (user.role === "VIEWER") {
-    throw new Error("Your account has read-only access.");
+  if (user.type !== "STAFF" || user.role === "VIEWER") {
+    throw new Error("Your account cannot perform this action.");
   }
   return user;
 }
@@ -99,8 +148,8 @@ export async function checkWriter(): Promise<
 > {
   const user = await getCurrentUser();
   if (!user) return { error: "You are not signed in." };
-  if (user.role === "VIEWER") {
-    return { error: "Your account has read-only access." };
+  if (user.type !== "STAFF" || user.role === "VIEWER") {
+    return { error: "Your account cannot perform this action." };
   }
   return { user };
 }

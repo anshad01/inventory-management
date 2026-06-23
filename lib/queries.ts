@@ -411,6 +411,100 @@ export async function getShareLinks() {
   }));
 }
 
+// --- Supplier portal (scoped to one supplier) ---
+
+export async function getSupplierOrders(supplierId: string) {
+  const pos = await prisma.purchaseOrder.findMany({
+    where: { supplierId },
+    orderBy: { createdAt: "desc" },
+    include: { _count: { select: { items: true } } },
+  });
+  return pos.map((po) => ({
+    id: po.id,
+    poNumber: po.poNumber,
+    status: po.status,
+    itemCount: po._count.items,
+    createdAt: po.createdAt.toISOString(),
+  }));
+}
+
+export async function getSupplierOrder(id: string, supplierId: string) {
+  const po = await prisma.purchaseOrder.findFirst({
+    where: { id, supplierId },
+    include: { items: { include: { product: true } } },
+  });
+  if (!po) return null;
+  const items = po.items.map((i) => ({
+    id: i.id,
+    productName: i.product.name,
+    sku: i.product.sku,
+    quantity: i.quantity,
+    unitCost: Number(i.unitCost),
+    lineTotal: i.quantity * Number(i.unitCost),
+  }));
+  return {
+    id: po.id,
+    poNumber: po.poNumber,
+    status: po.status,
+    notes: po.notes,
+    receivedAt: po.receivedAt?.toISOString() ?? null,
+    createdAt: po.createdAt.toISOString(),
+    items,
+    total: items.reduce((s, i) => s + i.lineTotal, 0),
+  };
+}
+
+// --- Customer storefront ---
+
+export async function getShopProducts(): Promise<ProductRow[]> {
+  const products = await prisma.product.findMany({
+    where: { isActive: true },
+    orderBy: { name: "asc" },
+    include: { category: true, supplier: true },
+  });
+  return products.map(toRow);
+}
+
+export async function getCustomerOrders(userId: string) {
+  const sales = await prisma.sale.findMany({
+    where: { customerUserId: userId },
+    orderBy: { soldAt: "desc" },
+    include: { items: true },
+  });
+  return sales.map((s) => ({
+    id: s.id,
+    saleNumber: s.saleNumber,
+    status: s.status,
+    itemCount: s.items.length,
+    total: s.items.reduce((sum, i) => sum + i.quantity * Number(i.unitPrice), 0),
+    soldAt: s.soldAt.toISOString(),
+  }));
+}
+
+export async function getCustomerOrder(id: string, userId: string) {
+  const sale = await prisma.sale.findFirst({
+    where: { id, customerUserId: userId },
+    include: { items: { include: { product: true } } },
+  });
+  if (!sale) return null;
+  const items = sale.items.map((i) => ({
+    id: i.id,
+    productName: i.product.name,
+    sku: i.product.sku,
+    quantity: i.quantity,
+    unitPrice: Number(i.unitPrice),
+    lineTotal: i.quantity * Number(i.unitPrice),
+  }));
+  return {
+    id: sale.id,
+    saleNumber: sale.saleNumber,
+    status: sale.status,
+    soldAt: sale.soldAt.toISOString(),
+    items,
+    total: items.reduce((s, i) => s + i.lineTotal, 0),
+  };
+}
+
 export async function getShareSnapshot(token: string) {
   const link = await prisma.shareLink.findUnique({ where: { token } });
   if (!link || !link.isActive) return null;

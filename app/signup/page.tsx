@@ -2,14 +2,13 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Boxes } from "lucide-react";
 
-import { LoginForm } from "@/components/login-form";
+import { SignupForm } from "@/components/signup-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getCurrentUser, homePathForType } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
-export default async function LoginPage() {
-  // Already signed in → go to the area for this account type.
+export default async function SignupPage() {
   const current = await getCurrentUser();
   if (current) redirect(homePathForType(current.type));
 
@@ -20,28 +19,22 @@ export default async function LoginPage() {
           <div className="flex size-11 items-center justify-center rounded-xl bg-primary text-primary-foreground">
             <Boxes className="size-6" />
           </div>
-          <h1 className="text-xl font-semibold tracking-tight">Inventory</h1>
+          <h1 className="text-xl font-semibold tracking-tight">Create your account</h1>
           <p className="text-sm text-muted-foreground">
-            Sign in to manage your stock.
+            Shop our latest computer peripherals.
           </p>
         </div>
         <Card>
           <CardHeader>
-            <CardTitle>Sign in</CardTitle>
+            <CardTitle>Sign up</CardTitle>
           </CardHeader>
           <CardContent>
-            <LoginForm />
+            <SignupForm />
             <p className="mt-4 text-center text-sm text-muted-foreground">
-              Shopping with us?{" "}
-              <Link href="/signup" className="font-medium text-foreground hover:underline">
-                Create a customer account
+              Already have an account?{" "}
+              <Link href="/login" className="font-medium text-foreground hover:underline">
+                Sign in
               </Link>
-            </p>
-            <p className="mt-4 rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
-              Demo accounts (password <code>password123</code>):<br />
-              <strong>priya@inventory.example</strong> — staff/admin ·{" "}
-              <strong>supplier@techsource.example</strong> — supplier ·{" "}
-              <strong>customer@example.com</strong> — customer
             </p>
           </CardContent>
         </Card>

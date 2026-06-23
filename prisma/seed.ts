@@ -11,9 +11,11 @@ const DEMO_PASSWORD = "password123";
 // development data (replaces the earlier in-memory mock layer).
 
 const users = [
-  { id: "u_priya", email: "priya@inventory.example", name: "Priya Anand", role: "ADMIN" as const },
-  { id: "u_sam", email: "sam@inventory.example", name: "Sam Lee", role: "STAFF" as const },
-  { id: "u_vee", email: "viewer@inventory.example", name: "Vee Viewer", role: "VIEWER" as const },
+  { id: "u_priya", email: "priya@inventory.example", name: "Priya Anand", type: "STAFF" as const, role: "ADMIN" as const, supplierId: null },
+  { id: "u_sam", email: "sam@inventory.example", name: "Sam Lee", type: "STAFF" as const, role: "STAFF" as const, supplierId: null },
+  { id: "u_vee", email: "viewer@inventory.example", name: "Vee Viewer", type: "STAFF" as const, role: "VIEWER" as const, supplierId: null },
+  { id: "u_supplier", email: "supplier@techsource.example", name: "Taylor (TechSource)", type: "SUPPLIER" as const, role: "VIEWER" as const, supplierId: "sup_techsource" },
+  { id: "u_customer", email: "customer@example.com", name: "Jordan Smith", type: "CUSTOMER" as const, role: "VIEWER" as const, supplierId: null },
 ];
 
 const categories = [
@@ -75,12 +77,15 @@ async function main() {
   await prisma.category.deleteMany();
   await prisma.user.deleteMany();
 
+  // Suppliers must exist before supplier-linked users are created.
+  await prisma.category.createMany({ data: categories });
+  await prisma.supplier.createMany({ data: suppliers });
+
   const passwordHash = hashPassword(DEMO_PASSWORD);
   for (const u of users) {
     await prisma.user.create({ data: { ...u, passwordHash } });
   }
-  await prisma.category.createMany({ data: categories });
-  await prisma.supplier.createMany({ data: suppliers });
+
   await prisma.product.createMany({ data: products });
   await prisma.stockMovement.createMany({ data: movements });
 

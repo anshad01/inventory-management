@@ -5,9 +5,8 @@ import { redirect } from "next/navigation";
 
 import { prisma } from "@/lib/db";
 import { applyMovement, nextDocNumber } from "@/lib/services/stock";
+import { checkWriter, requireWriter } from "@/lib/auth/session";
 import type { ActionResult } from "@/lib/types";
-
-const SEED_USER_ID = "u_priya";
 
 type LineItem = { productId: string; quantity: number; unitCost: number };
 
@@ -32,6 +31,7 @@ function parseItems(raw: string): LineItem[] {
 
 /** Create a draft purchase order with line items. */
 export async function createPurchaseOrder(formData: FormData) {
+  const actor = await requireWriter();
   const supplierId = String(formData.get("supplierId") ?? "").trim();
   const notes = String(formData.get("notes") ?? "").trim() || null;
   const items = parseItems(String(formData.get("items") ?? "[]"));
@@ -45,7 +45,7 @@ export async function createPurchaseOrder(formData: FormData) {
       supplierId,
       notes,
       status: "DRAFT",
-      createdById: SEED_USER_ID,
+      createdById: actor.id,
       items: {
         create: items.map((i) => ({
           productId: i.productId,
@@ -62,6 +62,8 @@ export async function createPurchaseOrder(formData: FormData) {
 
 /** Move a draft PO to ORDERED. */
 export async function markPurchaseOrderOrdered(id: string): Promise<ActionResult> {
+  const auth = await checkWriter();
+  if ("error" in auth) return { ok: false, error: auth.error };
   try {
     const po = await prisma.purchaseOrder.findUnique({ where: { id } });
     if (!po) throw new Error("Purchase order not found.");
@@ -80,6 +82,8 @@ export async function markPurchaseOrderOrdered(id: string): Promise<ActionResult
 
 /** Receive a PO: create PURCHASE_IN movements for each item, exactly once. */
 export async function receivePurchaseOrder(id: string): Promise<ActionResult> {
+  const auth = await checkWriter();
+  if ("error" in auth) return { ok: false, error: auth.error };
   try {
     await prisma.$transaction(async (tx) => {
       const po = await tx.purchaseOrder.findUnique({
@@ -99,7 +103,7 @@ export async function receivePurchaseOrder(id: string): Promise<ActionResult> {
           referenceType: "PURCHASE_ORDER",
           referenceId: po.id,
           unitCost: Number(item.unitCost),
-          createdById: SEED_USER_ID,
+          createdById: auth.user.id,
         });
       }
 
@@ -114,12 +118,15 @@ export async function receivePurchaseOrder(id: string): Promise<ActionResult> {
   revalidatePath(`/purchase-orders/${id}`);
   revalidatePath("/purchase-orders");
   revalidatePath("/products");
+  revalidatePath("/products/[id]", "page");
   revalidatePath("/");
   return { ok: true };
 }
 
 /** Cancel a PO that has not been received. */
 export async function cancelPurchaseOrder(id: string): Promise<ActionResult> {
+  const auth = await checkWriter();
+  if ("error" in auth) return { ok: false, error: auth.error };
   try {
     const po = await prisma.purchaseOrder.findUnique({ where: { id } });
     if (!po) throw new Error("Purchase order not found.");

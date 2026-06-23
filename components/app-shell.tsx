@@ -2,18 +2,40 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Boxes, Search, Bell } from "lucide-react";
+import { Boxes, Search, Bell, LogOut } from "lucide-react";
 
 import { navItems } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
+import { logout } from "@/lib/actions/auth";
 
 function isActive(pathname: string, href: string) {
   if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+const ROLE_LABELS: Record<string, string> = {
+  ADMIN: "Admin",
+  STAFF: "Staff",
+  VIEWER: "Viewer",
+};
+
+function initials(name: string) {
+  return name
+    .split(" ")
+    .map((p) => p[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
+
+export function AppShell({
+  user,
+  children,
+}: {
+  user: { name: string; role: string };
+  children: React.ReactNode;
+}) {
   const pathname = usePathname();
 
   return (
@@ -49,14 +71,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="border-t p-3">
           <div className="flex items-center gap-3 rounded-md px-2 py-1.5">
             <div className="flex size-8 items-center justify-center rounded-full bg-secondary text-xs font-semibold text-secondary-foreground">
-              PA
+              {initials(user.name)}
             </div>
-            <div className="min-w-0">
-              <div className="truncate text-sm font-medium">Priya Anand</div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-medium">{user.name}</div>
               <div className="truncate text-xs text-muted-foreground">
-                Admin
+                {ROLE_LABELS[user.role] ?? user.role}
               </div>
             </div>
+            <form action={logout}>
+              <button
+                type="submit"
+                aria-label="Sign out"
+                className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              >
+                <LogOut className="size-4" />
+              </button>
+            </form>
           </div>
         </div>
       </aside>

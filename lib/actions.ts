@@ -5,13 +5,12 @@ import { redirect } from "next/navigation";
 
 import { prisma } from "@/lib/db";
 import { applyMovement } from "@/lib/services/stock";
+import { checkWriter, requireWriter } from "@/lib/auth/session";
 import type { ActionResult } from "@/lib/types";
 
 // Server Actions = the write side of the backend. All stock changes go through
 // applyMovement so Product.quantityOnHand stays a transactional cache of the
 // movement history — quantity is never edited directly (SPEC.md §4).
-
-const SEED_USER_ID = "u_priya"; // stand-in until credential auth lands.
 
 /** Record a manual stock adjustment and update the cached quantity. */
 export async function adjustStock(
@@ -19,6 +18,9 @@ export async function adjustStock(
   delta: number,
   reason?: string,
 ): Promise<ActionResult> {
+  const auth = await checkWriter();
+  if ("error" in auth) return { ok: false, error: auth.error };
+
   if (!Number.isInteger(delta) || delta === 0) {
     return { ok: false, error: "Enter a non-zero whole number." };
   }
@@ -31,7 +33,7 @@ export async function adjustStock(
         quantity: delta,
         reason: reason?.trim() || null,
         referenceType: "MANUAL",
-        createdById: SEED_USER_ID,
+        createdById: auth.user.id,
       }),
     );
   } catch (e) {
@@ -46,6 +48,7 @@ export async function adjustStock(
 
 /** Create a product, with an opening PURCHASE_IN movement if it starts stocked. */
 export async function createProduct(formData: FormData) {
+  const actor = await requireWriter();
   const sku = String(formData.get("sku") ?? "").trim();
   const name = String(formData.get("name") ?? "").trim();
   const categoryId = String(formData.get("categoryId") ?? "").trim() || null;
@@ -84,7 +87,7 @@ export async function createProduct(formData: FormData) {
         reason: "Opening stock",
         referenceType: "MANUAL",
         unitCost: costPrice,
-        createdById: SEED_USER_ID,
+        createdById: actor.id,
       }),
     );
   }
@@ -96,6 +99,7 @@ export async function createProduct(formData: FormData) {
 
 /** Create a supplier. */
 export async function createSupplier(formData: FormData) {
+  await requireWriter();
   const name = String(formData.get("name") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim() || null;
   const phone = String(formData.get("phone") ?? "").trim() || null;

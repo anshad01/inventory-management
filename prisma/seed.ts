@@ -1,6 +1,10 @@
 import { PrismaClient } from "@prisma/client";
+import { hashPassword } from "../lib/auth/password";
 
 const prisma = new PrismaClient();
+
+// All demo accounts share this password (shown on the login screen).
+const DEMO_PASSWORD = "password123";
 
 // Demo dataset for a computer-peripherals store. Ids are explicit and stable so
 // URLs and tests stay predictable. This seed is the source of truth for local
@@ -9,6 +13,7 @@ const prisma = new PrismaClient();
 const users = [
   { id: "u_priya", email: "priya@inventory.example", name: "Priya Anand", role: "ADMIN" as const },
   { id: "u_sam", email: "sam@inventory.example", name: "Sam Lee", role: "STAFF" as const },
+  { id: "u_vee", email: "viewer@inventory.example", name: "Vee Viewer", role: "VIEWER" as const },
 ];
 
 const categories = [
@@ -70,11 +75,9 @@ async function main() {
   await prisma.category.deleteMany();
   await prisma.user.deleteMany();
 
+  const passwordHash = hashPassword(DEMO_PASSWORD);
   for (const u of users) {
-    await prisma.user.create({
-      // Placeholder hash — real credential auth lands in a later milestone.
-      data: { ...u, passwordHash: "seed-placeholder" },
-    });
+    await prisma.user.create({ data: { ...u, passwordHash } });
   }
   await prisma.category.createMany({ data: categories });
   await prisma.supplier.createMany({ data: suppliers });

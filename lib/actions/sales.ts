@@ -5,9 +5,8 @@ import { redirect } from "next/navigation";
 
 import { prisma } from "@/lib/db";
 import { applyMovement, nextDocNumber } from "@/lib/services/stock";
+import { checkWriter, requireWriter } from "@/lib/auth/session";
 import type { ActionResult } from "@/lib/types";
-
-const SEED_USER_ID = "u_priya";
 
 type LineItem = { productId: string; quantity: number; unitPrice: number };
 
@@ -32,6 +31,7 @@ function parseItems(raw: string): LineItem[] {
 
 /** Record a completed sale: SALE_OUT movements that draw down stock. */
 export async function createSale(formData: FormData) {
+  const actor = await requireWriter();
   const customerName = String(formData.get("customerName") ?? "").trim() || null;
   const notes = String(formData.get("notes") ?? "").trim() || null;
   const items = parseItems(String(formData.get("items") ?? "[]"));
@@ -45,7 +45,7 @@ export async function createSale(formData: FormData) {
         customerName,
         notes,
         status: "COMPLETED",
-        createdById: SEED_USER_ID,
+        createdById: actor.id,
         items: {
           create: items.map((i) => ({
             productId: i.productId,
@@ -64,7 +64,7 @@ export async function createSale(formData: FormData) {
         reason: `Sold on ${saleNumber}`,
         referenceType: "SALE",
         referenceId: created.id,
-        createdById: SEED_USER_ID,
+        createdById: actor.id,
       });
     }
     return created;
@@ -72,6 +72,7 @@ export async function createSale(formData: FormData) {
 
   revalidatePath("/sales");
   revalidatePath("/products");
+  revalidatePath("/products/[id]", "page");
   revalidatePath("/");
   redirect(`/sales/${sale.id}`);
 }
@@ -79,6 +80,8 @@ export async function createSale(formData: FormData) {
 /** Void a sale: reverse its SALE_OUT movements (returns stock) without deleting
  * history. Creates compensating PURCHASE_IN-style adjustments. */
 export async function voidSale(id: string): Promise<ActionResult> {
+  const auth = await checkWriter();
+  if ("error" in auth) return { ok: false, error: auth.error };
   try {
     await prisma.$transaction(async (tx) => {
       const sale = await tx.sale.findUnique({
@@ -96,7 +99,7 @@ export async function voidSale(id: string): Promise<ActionResult> {
           reason: `Void ${sale.saleNumber}`,
           referenceType: "SALE",
           referenceId: sale.id,
-          createdById: SEED_USER_ID,
+          createdById: auth.user.id,
         });
       }
 
@@ -108,6 +111,7 @@ export async function voidSale(id: string): Promise<ActionResult> {
   revalidatePath(`/sales/${id}`);
   revalidatePath("/sales");
   revalidatePath("/products");
+  revalidatePath("/products/[id]", "page");
   revalidatePath("/");
   return { ok: true };
 }

@@ -4,19 +4,16 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { prisma } from "@/lib/db";
+import { applyMovement } from "@/lib/services/stock";
+import type { ActionResult } from "@/lib/types";
 
 // Server Actions = the write side of the backend. All stock changes go through
-// createMovement so Product.quantityOnHand stays a transactional cache of the
+// applyMovement so Product.quantityOnHand stays a transactional cache of the
 // movement history — quantity is never edited directly (SPEC.md §4).
 
 const SEED_USER_ID = "u_priya"; // stand-in until credential auth lands.
 
-export type ActionResult = { ok: true } | { ok: false; error: string };
-
-/**
- * Record a stock movement and update the cached quantity in one transaction.
- * Rejects changes that would drive quantity below zero (no negative stock).
- */
+/** Record a manual stock adjustment and update the cached quantity. */
 export async function adjustStock(
   productId: string,
   delta: number,
@@ -27,36 +24,16 @@ export async function adjustStock(
   }
 
   try {
-    await prisma.$transaction(async (tx) => {
-      const product = await tx.product.findUnique({
-        where: { id: productId },
-        select: { quantityOnHand: true },
-      });
-      if (!product) throw new Error("Product not found.");
-
-      const next = product.quantityOnHand + delta;
-      if (next < 0) {
-        throw new Error(
-          `Not enough stock: ${product.quantityOnHand} on hand, cannot remove ${Math.abs(delta)}.`,
-        );
-      }
-
-      await tx.stockMovement.create({
-        data: {
-          productId,
-          type: "ADJUSTMENT",
-          quantity: delta,
-          reason: reason?.trim() || null,
-          referenceType: "MANUAL",
-          createdById: SEED_USER_ID,
-        },
-      });
-
-      await tx.product.update({
-        where: { id: productId },
-        data: { quantityOnHand: next },
-      });
-    });
+    await prisma.$transaction((tx) =>
+      applyMovement(tx, {
+        productId,
+        type: "ADJUSTMENT",
+        quantity: delta,
+        reason: reason?.trim() || null,
+        referenceType: "MANUAL",
+        createdById: SEED_USER_ID,
+      }),
+    );
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Failed." };
   }
@@ -67,8 +44,7 @@ export async function adjustStock(
   return { ok: true };
 }
 
-/** Create a product, then create an opening PURCHASE_IN movement if it starts
- * with stock (so the quantity is explainable by the movement history). */
+/** Create a product, with an opening PURCHASE_IN movement if it starts stocked. */
 export async function createProduct(formData: FormData) {
   const sku = String(formData.get("sku") ?? "").trim();
   const name = String(formData.get("name") ?? "").trim();
@@ -80,14 +56,10 @@ export async function createProduct(formData: FormData) {
   const reorderPoint = parseInt(String(formData.get("reorderPoint") ?? "0"), 10) || 0;
   const openingQty = parseInt(String(formData.get("openingQty") ?? "0"), 10) || 0;
 
-  if (!sku || !name) {
-    throw new Error("SKU and name are required.");
-  }
+  if (!sku || !name) throw new Error("SKU and name are required.");
 
   const existing = await prisma.product.findUnique({ where: { sku } });
-  if (existing) {
-    throw new Error(`A product with SKU "${sku}" already exists.`);
-  }
+  if (existing) throw new Error(`A product with SKU "${sku}" already exists.`);
 
   const product = await prisma.product.create({
     data: {
@@ -104,23 +76,17 @@ export async function createProduct(formData: FormData) {
   });
 
   if (openingQty > 0) {
-    await prisma.$transaction([
-      prisma.stockMovement.create({
-        data: {
-          productId: product.id,
-          type: "PURCHASE_IN",
-          quantity: openingQty,
-          reason: "Opening stock",
-          referenceType: "MANUAL",
-          unitCost: costPrice,
-          createdById: SEED_USER_ID,
-        },
+    await prisma.$transaction((tx) =>
+      applyMovement(tx, {
+        productId: product.id,
+        type: "PURCHASE_IN",
+        quantity: openingQty,
+        reason: "Opening stock",
+        referenceType: "MANUAL",
+        unitCost: costPrice,
+        createdById: SEED_USER_ID,
       }),
-      prisma.product.update({
-        where: { id: product.id },
-        data: { quantityOnHand: openingQty },
-      }),
-    ]);
+    );
   }
 
   revalidatePath("/products");

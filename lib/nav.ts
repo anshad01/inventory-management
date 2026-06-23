@@ -6,6 +6,7 @@ import {
   FolderTree,
   Users,
   Share2,
+  BarChart3,
   type LucideIcon,
 } from "lucide-react";
 
@@ -24,6 +25,7 @@ export const navItems: NavItem[] = [
   { label: "Purchase Orders", href: "/purchase-orders", icon: Truck },
   { label: "Sales", href: "/sales", icon: ShoppingCart },
   { label: "Suppliers", href: "/suppliers", icon: FolderTree },
+  { label: "Reports", href: "/reports", icon: BarChart3 },
   { label: "Share Links", href: "/share", icon: Share2 },
   { label: "Users", href: "/settings/users", icon: Users },
 ];

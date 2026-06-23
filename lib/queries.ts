@@ -221,3 +221,225 @@ export async function getSuppliers() {
     productCount: s._count.products,
   }));
 }
+
+// --- Product picker (for PO / Sale line-item editors) ---
+
+export type PickerProduct = {
+  id: string;
+  name: string;
+  sku: string;
+  costPrice: number;
+  sellPrice: number;
+  quantityOnHand: number;
+};
+
+export async function getPickerProducts(): Promise<PickerProduct[]> {
+  const products = await prisma.product.findMany({
+    where: { isActive: true },
+    orderBy: { name: "asc" },
+    select: {
+      id: true,
+      name: true,
+      sku: true,
+      costPrice: true,
+      sellPrice: true,
+      quantityOnHand: true,
+    },
+  });
+  return products.map((p) => ({
+    id: p.id,
+    name: p.name,
+    sku: p.sku,
+    costPrice: Number(p.costPrice),
+    sellPrice: Number(p.sellPrice),
+    quantityOnHand: p.quantityOnHand,
+  }));
+}
+
+// --- Purchase Orders ---
+
+export async function getPurchaseOrders() {
+  const pos = await prisma.purchaseOrder.findMany({
+    orderBy: { createdAt: "desc" },
+    include: { supplier: true, _count: { select: { items: true } } },
+  });
+  return pos.map((po) => ({
+    id: po.id,
+    poNumber: po.poNumber,
+    supplierName: po.supplier.name,
+    status: po.status,
+    itemCount: po._count.items,
+    createdAt: po.createdAt.toISOString(),
+  }));
+}
+
+export async function getPurchaseOrder(id: string) {
+  const po = await prisma.purchaseOrder.findUnique({
+    where: { id },
+    include: { supplier: true, items: { include: { product: true } } },
+  });
+  if (!po) return null;
+  const items = po.items.map((i) => ({
+    id: i.id,
+    productId: i.productId,
+    productName: i.product.name,
+    sku: i.product.sku,
+    quantity: i.quantity,
+    unitCost: Number(i.unitCost),
+    lineTotal: i.quantity * Number(i.unitCost),
+  }));
+  return {
+    id: po.id,
+    poNumber: po.poNumber,
+    supplierName: po.supplier.name,
+    status: po.status,
+    notes: po.notes,
+    orderedAt: po.orderedAt?.toISOString() ?? null,
+    receivedAt: po.receivedAt?.toISOString() ?? null,
+    createdAt: po.createdAt.toISOString(),
+    items,
+    total: items.reduce((s, i) => s + i.lineTotal, 0),
+  };
+}
+
+// --- Sales ---
+
+export async function getSales() {
+  const sales = await prisma.sale.findMany({
+    orderBy: { soldAt: "desc" },
+    include: { items: true },
+  });
+  return sales.map((s) => ({
+    id: s.id,
+    saleNumber: s.saleNumber,
+    customerName: s.customerName,
+    status: s.status,
+    itemCount: s.items.length,
+    total: s.items.reduce((sum, i) => sum + i.quantity * Number(i.unitPrice), 0),
+    soldAt: s.soldAt.toISOString(),
+  }));
+}
+
+export async function getSale(id: string) {
+  const sale = await prisma.sale.findUnique({
+    where: { id },
+    include: { items: { include: { product: true } } },
+  });
+  if (!sale) return null;
+  const items = sale.items.map((i) => ({
+    id: i.id,
+    productId: i.productId,
+    productName: i.product.name,
+    sku: i.product.sku,
+    quantity: i.quantity,
+    unitPrice: Number(i.unitPrice),
+    lineTotal: i.quantity * Number(i.unitPrice),
+  }));
+  return {
+    id: sale.id,
+    saleNumber: sale.saleNumber,
+    customerName: sale.customerName,
+    status: sale.status,
+    notes: sale.notes,
+    soldAt: sale.soldAt.toISOString(),
+    items,
+    total: items.reduce((s, i) => s + i.lineTotal, 0),
+  };
+}
+
+// --- Reports ---
+
+export type ValuationRow = {
+  id: string;
+  name: string;
+  sku: string;
+  quantityOnHand: number;
+  costPrice: number;
+  sellPrice: number;
+  costValue: number;
+  retailValue: number;
+};
+
+export async function getValuationReport() {
+  const products = (
+    await prisma.product.findMany({
+      where: { isActive: true },
+      orderBy: { name: "asc" },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        quantityOnHand: true,
+        costPrice: true,
+        sellPrice: true,
+      },
+    })
+  ).map((p) => {
+    const costPrice = Number(p.costPrice);
+    const sellPrice = Number(p.sellPrice);
+    return {
+      id: p.id,
+      name: p.name,
+      sku: p.sku,
+      quantityOnHand: p.quantityOnHand,
+      costPrice,
+      sellPrice,
+      costValue: p.quantityOnHand * costPrice,
+      retailValue: p.quantityOnHand * sellPrice,
+    };
+  });
+
+  const totalCost = products.reduce((s, p) => s + p.costValue, 0);
+  const totalRetail = products.reduce((s, p) => s + p.retailValue, 0);
+  const totalUnits = products.reduce((s, p) => s + p.quantityOnHand, 0);
+  return { rows: products, totalCost, totalRetail, totalUnits };
+}
+
+// --- Share Links ---
+
+export async function getShareLinks() {
+  const links = await prisma.shareLink.findMany({
+    orderBy: { createdAt: "desc" },
+  });
+  return links.map((l) => ({
+    id: l.id,
+    token: l.token,
+    title: l.title,
+    scope: l.scope,
+    isActive: l.isActive,
+    createdAt: l.createdAt.toISOString(),
+  }));
+}
+
+export async function getShareSnapshot(token: string) {
+  const link = await prisma.shareLink.findUnique({ where: { token } });
+  if (!link || !link.isActive) return null;
+  if (link.expiresAt && link.expiresAt < new Date()) return null;
+
+  const where: { isActive: boolean; categoryId?: string } = { isActive: true };
+  if (link.scope === "CATEGORY" && link.categoryId) {
+    where.categoryId = link.categoryId;
+  }
+
+  let products = (
+    await prisma.product.findMany({
+      where,
+      orderBy: { name: "asc" },
+      include: { category: true },
+    })
+  ).map(toRow);
+
+  if (link.scope === "LOW_STOCK") {
+    products = products.filter(
+      (p) =>
+        p.quantityOnHand <= 0 ||
+        (p.reorderPoint > 0 && p.quantityOnHand <= p.reorderPoint),
+    );
+  }
+
+  return {
+    title: link.title,
+    scope: link.scope,
+    products,
+  };
+}

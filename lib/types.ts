@@ -4,6 +4,9 @@
 
 export type Role = "ADMIN" | "STAFF" | "VIEWER";
 
+// Result shape returned by mutating Server Actions that report errors to the UI.
+export type ActionResult = { ok: true } | { ok: false; error: string };
+
 export type MovementType = "PURCHASE_IN" | "SALE_OUT" | "ADJUSTMENT";
 
 export interface Category {

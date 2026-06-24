@@ -57,7 +57,7 @@ function toRow(p: ProductWithRelations): ProductRow {
     reorderPoint: p.reorderPoint,
     unit: p.unit,
     isActive: p.isActive,
-    imageUrl: p.imageUrl ?? null,
+    imageUrl: p.imageUrl ?? undefined,
     updatedAt: p.updatedAt.toISOString(),
     categoryName: p.category?.name ?? null,
     supplierName: p.supplier?.name ?? null,
@@ -799,4 +799,5 @@ export async function getShareSnapshot(token: string) {
     products,
   };
 }
+
 

@@ -35,9 +35,8 @@ export interface Product {
   reorderPoint: number;
   unit: string;
   isActive: boolean;
-  imageUrl?: string | null;
-  updatedAt: string;
   imageUrl?: string;
+  updatedAt: string;
 }
 
 export interface StockMovement {
@@ -58,3 +57,4 @@ export function stockStatus(product: Product): StockStatus {
     return "low_stock";
   return "in_stock";
 }
+

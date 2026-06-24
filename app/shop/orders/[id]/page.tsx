@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, CheckCircle2 } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
+import { OrderStatusStepper } from "@/components/order-status-stepper";
 import { DocStatusBadge } from "@/components/doc-status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,12 +39,12 @@ export default async function CustomerOrderDetailPage({
         </Link>
       </Button>
 
-      <div className="mb-6 flex items-center gap-2 rounded-lg border bg-success/5 p-4 text-sm">
-        <CheckCircle2 className="size-5 text-success" />
-        <span>
-          Order <strong>{order.saleNumber}</strong> placed on {formatDate(order.soldAt)}.
-        </span>
-      </div>
+     <div className="mb-6 space-y-3">
+  <p className="text-sm text-muted-foreground">
+    Order <strong>{order.saleNumber}</strong> placed on {formatDate(order.soldAt)}.
+  </p>
+  <OrderStatusStepper status={order.status} />
+</div>
 
       <PageHeader title={`Order ${order.saleNumber}`}>
         <DocStatusBadge status={order.status} />

@@ -1,4 +1,5 @@
-import { Boxes, LogOut } from "lucide-react";
+import Link from "next/link";
+import { Boxes, LogOut, Package, ShoppingCart } from "lucide-react";
 
 import { logout } from "@/lib/actions/auth";
 import { requireSupplier } from "@/lib/auth/session";
@@ -20,6 +21,23 @@ export default async function PortalLayout({
             <Boxes className="size-4" />
           </div>
           <span className="font-semibold tracking-tight">Supplier Portal</span>
+
+          {/* Nav links */}
+          <nav className="ml-4 flex items-center gap-1">
+            <Link
+              href="/portal"
+              className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            >
+              <ShoppingCart className="size-4" /> Orders
+            </Link>
+            <Link
+              href="/portal/products"
+              className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            >
+              <Package className="size-4" /> Products
+            </Link>
+          </nav>
+
           <div className="ml-auto flex items-center gap-3 text-sm">
             <span className="hidden text-muted-foreground sm:inline">{user.name}</span>
             <form action={logout}>

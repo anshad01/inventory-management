@@ -37,7 +37,7 @@ export async function checkout(lines: CartLine[]): Promise<CheckoutResult> {
           saleNumber,
           customerName: user.name,
           customerUserId: user.id,
-          status: "COMPLETED",
+          status: "PENDING",
           createdById: user.id,
           items: {
             create: wanted.map((w) => ({

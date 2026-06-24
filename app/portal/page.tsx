@@ -5,12 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { DocStatusBadge } from "@/components/doc-status-badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { getSupplierOrders } from "@/lib/queries";
 import { requireSupplier } from "@/lib/auth/session";
@@ -24,11 +19,7 @@ export default async function PortalHomePage() {
 
   return (
     <div>
-      <PageHeader
-        title="Your purchase orders"
-        description="Orders the store has placed with you."
-      />
-
+      <PageHeader title="Your purchase orders" description="Orders the store has placed with you." />
       <Card>
         <CardContent className="p-0">
           {orders.length === 0 ? (
@@ -52,22 +43,13 @@ export default async function PortalHomePage() {
                 {orders.map((po) => (
                   <TableRow key={po.id}>
                     <TableCell>
-                      <Link
-                        href={`/portal/orders/${po.id}`}
-                        className="font-mono font-medium hover:underline"
-                      >
+                      <Link href={`/portal/orders/${po.id}`} className="font-mono font-medium hover:underline">
                         {po.poNumber}
                       </Link>
                     </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {formatNumber(po.itemCount)}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {formatDate(po.createdAt)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <DocStatusBadge status={po.status} />
-                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{formatNumber(po.itemCount)}</TableCell>
+                    <TableCell className="text-muted-foreground">{formatDate(po.createdAt)}</TableCell>
+                    <TableCell className="text-right"><DocStatusBadge status={po.status} /></TableCell>
                   </TableRow>
                 ))}
               </TableBody>

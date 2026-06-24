@@ -37,6 +37,7 @@ type ProductWithRelations = {
   unit: string;
   isActive: boolean;
   updatedAt: Date;
+  imageUrl: string | null;
   category?: { name: string } | null;
   supplier?: { name: string } | null;
 };
@@ -59,6 +60,7 @@ function toRow(p: ProductWithRelations): ProductRow {
     updatedAt: p.updatedAt.toISOString(),
     categoryName: p.category?.name ?? null,
     supplierName: p.supplier?.name ?? null,
+    imageUrl: (p as any).imageUrl ?? null,
   };
 }
 

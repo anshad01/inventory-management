@@ -36,6 +36,7 @@ export interface Product {
   unit: string;
   isActive: boolean;
   updatedAt: string;
+  imageUrl?: string;
 }
 
 export interface StockMovement {

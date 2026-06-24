@@ -59,28 +59,15 @@ export default async function SalesPage() {
               </TableHeader>
               <TableBody>
                 {sales.map((s) => (
-                  <TableRow key={s.id}>
-                    <TableCell>
-                      <Link
-                        href={`/sales/${s.id}`}
-                        className="font-mono font-medium hover:underline"
-                      >
-                        {s.saleNumber}
-                      </Link>
-                    </TableCell>
-                    <TableCell>{s.customerName ?? "—"}</TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {formatNumber(s.itemCount)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {formatCurrency(s.total)}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {formatDate(s.soldAt)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <DocStatusBadge status={s.status} />
-                    </TableCell>
+                  <TableRow key={s.id} className="cursor-pointer hover:bg-muted/50">
+                   <TableCell>
+                   <Link href={`/sales/${s.id}`} className="font-mono font-medium">{s.saleNumber}</Link>
+                   </TableCell>
+                   <TableCell><Link href={`/sales/${s.id}`} className="block">{s.customerName ?? "—"}</Link></TableCell>
+                   <TableCell className="text-right tabular-nums"><Link href={`/sales/${s.id}`} className="block">{formatNumber(s.itemCount)}</Link></TableCell>
+                   <TableCell className="text-right tabular-nums"><Link href={`/sales/${s.id}`} className="block">{formatCurrency(s.total)}</Link></TableCell>
+                  <TableCell className="text-muted-foreground"><Link href={`/sales/${s.id}`} className="block">{formatDate(s.soldAt)}</Link></TableCell>
+                  <TableCell className="text-right"><Link href={`/sales/${s.id}`} className="block"><DocStatusBadge status={s.status} /></Link></TableCell>
                   </TableRow>
                 ))}
               </TableBody>

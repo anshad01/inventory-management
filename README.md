@@ -50,7 +50,7 @@ Three account types, each with its own area:
 approval) · supplier approval workflow · CSV export of orders and inventory ·
 basic in-memory rate limiting on auth/checkout.
 
-> **Not done: live deployment (#8).** `DEPLOYMENT.md` has a complete
+> **Live deployment:** https://inventory-management-zeta-plum.vercel.app
 > Supabase + Vercel guide, but no public URL is provisioned from this repo.
 
 ## Demo accounts
@@ -139,3 +139,4 @@ prisma/seed.ts       demo dataset (incl. per-category placeholder images)
   deployment would use Redis/Upstash.
 - **Stock is reserved at checkout.** Placing an order decrements stock
   immediately; cancelling before shipment restores it.
+

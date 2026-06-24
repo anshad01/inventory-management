@@ -43,14 +43,21 @@ enum POStatus {
   CANCELLED
 }
 
+// Customer order lifecycle (SPEC §5). Linear flow with a cancel escape hatch:
+// PENDING → CONFIRMED → SHIPPED → DELIVERED, or → CANCELLED (which restores
+// stock). In-store sales created by staff are recorded directly as DELIVERED.
 enum SaleStatus {
   PENDING
   CONFIRMED
   SHIPPED
   DELIVERED
-  VOIDED
   CANCELLED
-  COMPLETED
+}
+
+enum NotificationType {
+  ORDER_STATUS
+  LOW_STOCK
+  SUPPLIER_APPROVAL
 }
 
 enum ShareScope {
@@ -69,6 +76,10 @@ model User {
   phone        String?
   supplierId   String? // set for SUPPLIER accounts
   isActive     Boolean     @default(true)
+  // Supplier approval workflow (bonus): self-registered suppliers start
+  // unapproved and cannot list products until an admin approves them. STAFF and
+  // CUSTOMER accounts are approved by default.
+  isApproved   Boolean     @default(true)
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 
@@ -78,8 +89,23 @@ model User {
   sales          Sale[]          @relation("SaleCreatedBy")
   orders         Sale[]          @relation("SaleCustomer")
   shareLinks     ShareLink[]
+  notifications  Notification[]
 
   @@index([supplierId])
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType
+  message   String
+  href      String?
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
 }
 
 model Category {
@@ -184,7 +210,7 @@ model Sale {
   saleNumber     String     @unique
   customerName   String?
   customerUserId String? // set when placed by a logged-in customer
-  status         SaleStatus @default(COMPLETED)
+  status         SaleStatus @default(PENDING)
   soldAt         DateTime   @default(now())
   notes          String?
   createdById    String?

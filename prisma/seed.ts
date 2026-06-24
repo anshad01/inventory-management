@@ -11,12 +11,47 @@ const DEMO_PASSWORD = "password123";
 // development data (replaces the earlier in-memory mock layer).
 
 const users = [
-  { id: "u_priya", email: "priya@inventory.example", name: "Priya Anand", type: "STAFF" as const, role: "ADMIN" as const, supplierId: null },
-  { id: "u_sam", email: "sam@inventory.example", name: "Sam Lee", type: "STAFF" as const, role: "STAFF" as const, supplierId: null },
-  { id: "u_vee", email: "viewer@inventory.example", name: "Vee Viewer", type: "STAFF" as const, role: "VIEWER" as const, supplierId: null },
-  { id: "u_supplier", email: "supplier@techsource.example", name: "Taylor (TechSource)", type: "SUPPLIER" as const, role: "VIEWER" as const, supplierId: "sup_techsource" },
-  { id: "u_customer", email: "customer@example.com", name: "Jordan Smith", type: "CUSTOMER" as const, role: "VIEWER" as const, supplierId: null },
+  { id: "u_priya", email: "priya@inventory.example", name: "Priya Anand", type: "STAFF" as const, role: "ADMIN" as const, supplierId: null, isApproved: true },
+  { id: "u_sam", email: "sam@inventory.example", name: "Sam Lee", type: "STAFF" as const, role: "STAFF" as const, supplierId: null, isApproved: true },
+  { id: "u_vee", email: "viewer@inventory.example", name: "Vee Viewer", type: "STAFF" as const, role: "VIEWER" as const, supplierId: null, isApproved: true },
+  { id: "u_supplier", email: "supplier@techsource.example", name: "Taylor (TechSource)", type: "SUPPLIER" as const, role: "VIEWER" as const, supplierId: "sup_techsource", isApproved: true },
+  { id: "u_supplier2", email: "newsupplier@pericore.example", name: "Robin (PeriCore)", type: "SUPPLIER" as const, role: "VIEWER" as const, supplierId: "sup_pericore", isApproved: false },
+  { id: "u_customer", email: "customer@example.com", name: "Jordan Smith", type: "CUSTOMER" as const, role: "VIEWER" as const, supplierId: null, isApproved: true },
 ];
+
+// Real product photos (Unsplash CDN). Each id below was verified to resolve;
+// the `u()` helper applies consistent sizing/format params. If a product has no
+// specific photo we fall back to the category SVG, then a generic placeholder —
+// so the catalog always renders something sensible even offline.
+const u = (id: string) =>
+  `https://images.unsplash.com/photo-${id}?auto=format&fit=crop&w=800&q=80`;
+
+const productImage: Record<string, string> = {
+  p_001: u("1587829741301-dc798b83add3"), // mechanical keyboard
+  p_002: u("1618384887929-16ec33fab9ef"), // slim wireless keyboard
+  p_003: u("1527814050087-3793815479db"), // wireless mouse
+  p_004: u("1615663245857-ac93bb7c39e7"), // RGB gaming mouse
+  p_005: u("1527443224154-c4a3942d3acf"), // QHD monitor
+  p_006: u("1517336714731-489689fd1ca8"), // FHD monitor
+  p_007: u("1599669454699-248893623440"), // USB headset
+  p_008: u("1618366712010-f4ae9c647dcb"), // wireless headset
+  p_009: u("1623949556303-b0d17d198863"), // webcam
+  p_010: u("1531492746076-161ca9bcad58"), // portable SSD
+  p_011: u("1625842268584-8f3296236761"), // USB-C hub
+  p_012: u("1558618666-fcd25c85cd64"), //   HDMI cable
+};
+
+// Category-level SVG fallbacks (bundled locally, always available).
+const categoryImage: Record<string, string> = {
+  cat_keyboards: "/img/categories/keyboards.svg",
+  cat_mice: "/img/categories/mice.svg",
+  cat_monitors: "/img/categories/monitors.svg",
+  cat_audio: "/img/categories/headsets.svg",
+  cat_webcams: "/img/categories/webcams.svg",
+  cat_storage: "/img/categories/storage.svg",
+  cat_cables: "/img/categories/cables.svg",
+  cat_docks: "/img/categories/docks.svg",
+};
 
 const categories = [
   { id: "cat_keyboards", name: "Keyboards" },
@@ -66,6 +101,7 @@ const movements = [
 
 async function main() {
   // Clear in dependency order so the seed is idempotent.
+  await prisma.notification.deleteMany();
   await prisma.stockMovement.deleteMany();
   await prisma.saleItem.deleteMany();
   await prisma.sale.deleteMany();
@@ -86,7 +122,15 @@ async function main() {
     await prisma.user.create({ data: { ...u, passwordHash } });
   }
 
-  await prisma.product.createMany({ data: products });
+  await prisma.product.createMany({
+    data: products.map((p) => ({
+      ...p,
+      imageUrl:
+        productImage[p.id] ??
+        categoryImage[p.categoryId] ??
+        "/img/categories/placeholder.svg",
+    })),
+  });
   await prisma.stockMovement.createMany({ data: movements });
 
   console.log(

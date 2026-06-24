@@ -35,6 +35,7 @@ export interface Product {
   reorderPoint: number;
   unit: string;
   isActive: boolean;
+  imageUrl?: string | null;
   updatedAt: string;
   imageUrl?: string;
 }

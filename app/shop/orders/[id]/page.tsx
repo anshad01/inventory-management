@@ -5,6 +5,8 @@ import { ArrowLeft } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { OrderStatusStepper } from "@/components/order-status-stepper";
 import { DocStatusBadge } from "@/components/doc-status-badge";
+import { OrderTimeline } from "@/components/order-timeline";
+import { CancelOrderButton } from "@/components/cancel-order-button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -47,8 +49,15 @@ export default async function CustomerOrderDetailPage({
 </div>
 
       <PageHeader title={`Order ${order.saleNumber}`}>
-        <DocStatusBadge status={order.status} />
+        <div className="flex items-center gap-3">
+          <DocStatusBadge status={order.status} />
+          {order.status === "PENDING" ? <CancelOrderButton id={order.id} /> : null}
+        </div>
       </PageHeader>
+
+      <div className="mb-6">
+        <OrderTimeline status={order.status} />
+      </div>
 
       <Card>
         <CardHeader>

@@ -36,6 +36,7 @@ type ProductWithRelations = {
   reorderPoint: number;
   unit: string;
   isActive: boolean;
+  imageUrl: string | null;
   updatedAt: Date;
   imageUrl: string | null;
   category?: { name: string } | null;
@@ -57,6 +58,7 @@ function toRow(p: ProductWithRelations): ProductRow {
     reorderPoint: p.reorderPoint,
     unit: p.unit,
     isActive: p.isActive,
+    imageUrl: p.imageUrl ?? null,
     updatedAt: p.updatedAt.toISOString(),
     categoryName: p.category?.name ?? null,
     supplierName: p.supplier?.name ?? null,
@@ -68,35 +70,69 @@ export async function getProducts(opts: {
   q?: string;
   category?: string;
   filter?: string;
-}): Promise<ProductRow[]> {
+  page?: number;
+  perPage?: number;
+}): Promise<{ rows: ProductRow[]; total: number; page: number; pageCount: number }> {
+  const perPage = opts.perPage ?? 12;
+  const page = Math.max(1, opts.page ?? 1);
   const query = (opts.q ?? "").trim();
-  const products = await prisma.product.findMany({
-    where: {
-      isActive: true,
-      ...(opts.category ? { categoryId: opts.category } : {}),
-      ...(query
-        ? {
-            OR: [
-              { name: { contains: query, mode: "insensitive" } },
-              { sku: { contains: query, mode: "insensitive" } },
-              { barcode: { contains: query } },
-            ],
-          }
-        : {}),
-    },
-    include: { category: true, supplier: true },
-    orderBy: { name: "asc" },
-  });
+  const where = {
+    isActive: true,
+    ...(opts.category ? { categoryId: opts.category } : {}),
+    ...(query
+      ? {
+          OR: [
+            { name: { contains: query, mode: "insensitive" as const } },
+            { sku: { contains: query, mode: "insensitive" as const } },
+            { barcode: { contains: query } },
+          ],
+        }
+      : {}),
+  };
 
-  let rows = products.map(toRow);
+  // The low-stock filter compares two columns, which Prisma can't express in a
+  // WHERE clause, so it's applied (and paginated) in memory. The normal listing
+  // paginates at the database.
   if (opts.filter === "low") {
-    rows = rows.filter(
-      (p) =>
-        p.quantityOnHand <= 0 ||
-        (p.reorderPoint > 0 && p.quantityOnHand <= p.reorderPoint),
-    );
+    const all = (
+      await prisma.product.findMany({
+        where,
+        include: { category: true, supplier: true },
+        orderBy: { name: "asc" },
+      })
+    )
+      .map(toRow)
+      .filter(
+        (p) =>
+          p.quantityOnHand <= 0 ||
+          (p.reorderPoint > 0 && p.quantityOnHand <= p.reorderPoint),
+      );
+    const total = all.length;
+    return {
+      rows: all.slice((page - 1) * perPage, page * perPage),
+      total,
+      page,
+      pageCount: Math.max(1, Math.ceil(total / perPage)),
+    };
   }
-  return rows;
+
+  const [total, products] = await Promise.all([
+    prisma.product.count({ where }),
+    prisma.product.findMany({
+      where,
+      include: { category: true, supplier: true },
+      orderBy: { name: "asc" },
+      skip: (page - 1) * perPage,
+      take: perPage,
+    }),
+  ]);
+
+  return {
+    rows: products.map(toRow),
+    total,
+    page,
+    pageCount: Math.max(1, Math.ceil(total / perPage)),
+  };
 }
 
 export async function getActiveProductCount(): Promise<number> {
@@ -397,6 +433,159 @@ export async function getValuationReport() {
   return { rows: products, totalCost, totalRetail, totalUnits };
 }
 
+// --- Users (admin) ---
+
+export type UserRow = {
+  id: string;
+  name: string;
+  email: string;
+  type: string;
+  role: string;
+  supplierName: string | null;
+  isActive: boolean;
+  isApproved: boolean;
+  createdAt: string;
+};
+
+export async function getUsers(): Promise<UserRow[]> {
+  const users = await prisma.user.findMany({
+    orderBy: [{ type: "asc" }, { createdAt: "asc" }],
+    include: { supplier: { select: { name: true } } },
+  });
+  return users.map((u) => ({
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    type: u.type,
+    role: u.role,
+    supplierName: u.supplier?.name ?? null,
+    isActive: u.isActive,
+    isApproved: u.isApproved,
+    createdAt: u.createdAt.toISOString(),
+  }));
+}
+
+// --- Notifications ---
+
+export type NotificationView = {
+  id: string;
+  type: string;
+  message: string;
+  href: string | null;
+  isRead: boolean;
+  createdAt: string;
+};
+
+export async function getNotifications(
+  userId: string,
+  limit = 12,
+): Promise<{ items: NotificationView[]; unread: number }> {
+  const [rows, unread] = await Promise.all([
+    prisma.notification.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+    }),
+    prisma.notification.count({ where: { userId, isRead: false } }),
+  ]);
+  return {
+    items: rows.map((n) => ({
+      id: n.id,
+      type: n.type,
+      message: n.message,
+      href: n.href,
+      isRead: n.isRead,
+      createdAt: n.createdAt.toISOString(),
+    })),
+    unread,
+  };
+}
+
+// --- Sales analytics (admin dashboard aggregates, SPEC §6) ---
+
+export type SalesReport = {
+  totalRevenue: number;
+  orderCount: number;
+  ordersToday: number;
+  perDay: { date: string; orders: number; revenue: number }[];
+  bySupplier: { supplier: string; revenue: number; units: number }[];
+};
+
+/** Aggregates over non-cancelled sales: revenue totals, orders per day for the
+ * last 7 days, and revenue per supplier. */
+export async function getSalesReport(): Promise<SalesReport> {
+  const sales = await prisma.sale.findMany({
+    where: { status: { not: "CANCELLED" } },
+    include: { items: { include: { product: { include: { supplier: true } } } } },
+    orderBy: { soldAt: "desc" },
+  });
+
+  const dayKey = (d: Date) => d.toISOString().slice(0, 10);
+  const todayKey = dayKey(new Date());
+
+  let totalRevenue = 0;
+  let ordersToday = 0;
+  const perDayMap = new Map<string, { orders: number; revenue: number }>();
+  const supplierMap = new Map<string, { revenue: number; units: number }>();
+
+  // Seed the last 7 days so quiet days still show as zero.
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - i);
+    perDayMap.set(dayKey(d), { orders: 0, revenue: 0 });
+  }
+
+  for (const sale of sales) {
+    const orderTotal = sale.items.reduce(
+      (s, i) => s + i.quantity * Number(i.unitPrice),
+      0,
+    );
+    totalRevenue += orderTotal;
+
+    const key = dayKey(sale.soldAt);
+    if (key === todayKey) ordersToday += 1;
+    if (perDayMap.has(key)) {
+      const bucket = perDayMap.get(key)!;
+      bucket.orders += 1;
+      bucket.revenue += orderTotal;
+    }
+
+    for (const item of sale.items) {
+      const name = item.product.supplier?.name ?? "Unassigned";
+      const bucket = supplierMap.get(name) ?? { revenue: 0, units: 0 };
+      bucket.revenue += item.quantity * Number(item.unitPrice);
+      bucket.units += item.quantity;
+      supplierMap.set(name, bucket);
+    }
+  }
+
+  return {
+    totalRevenue,
+    orderCount: sales.length,
+    ordersToday,
+    perDay: [...perDayMap.entries()].map(([date, v]) => ({ date, ...v })),
+    bySupplier: [...supplierMap.entries()]
+      .map(([supplier, v]) => ({ supplier, ...v }))
+      .sort((a, b) => b.revenue - a.revenue),
+  };
+}
+
+/** Flat order rows for CSV export. */
+export async function getOrdersForExport() {
+  const sales = await prisma.sale.findMany({
+    orderBy: { soldAt: "desc" },
+    include: { items: true },
+  });
+  return sales.map((s) => ({
+    saleNumber: s.saleNumber,
+    customer: s.customerName ?? "",
+    status: s.status,
+    items: s.items.reduce((n, i) => n + i.quantity, 0),
+    total: s.items.reduce((sum, i) => sum + i.quantity * Number(i.unitPrice), 0),
+    soldAt: s.soldAt.toISOString(),
+  }));
+}
+
 // --- Share Links ---
 
 export async function getShareLinks() {
@@ -456,15 +645,88 @@ export async function getSupplierOrder(id: string, supplierId: string) {
   };
 }
 
-// --- Customer storefront ---
-
-export async function getShopProducts(): Promise<ProductRow[]> {
+export async function getSupplierProducts(supplierId: string): Promise<ProductRow[]> {
   const products = await prisma.product.findMany({
-    where: { isActive: true },
-    orderBy: { name: "asc" },
+    where: { supplierId, isActive: true },
     include: { category: true, supplier: true },
+    orderBy: { name: "asc" },
   });
   return products.map(toRow);
+}
+
+export async function getSupplierProduct(
+  id: string,
+  supplierId: string,
+): Promise<ProductRow | null> {
+  const product = await prisma.product.findFirst({
+    where: { id, supplierId },
+    include: { category: true, supplier: true },
+  });
+  return product ? toRow(product) : null;
+}
+
+// --- Customer storefront ---
+
+export type ShopFilters = {
+  q?: string;
+  category?: string;
+  minPrice?: number;
+  maxPrice?: number;
+  inStock?: boolean;
+  page?: number;
+  perPage?: number;
+};
+
+export type Paged<T> = {
+  rows: T[];
+  total: number;
+  page: number;
+  perPage: number;
+  pageCount: number;
+};
+
+export async function getShopProducts(
+  opts: ShopFilters = {},
+): Promise<Paged<ProductRow>> {
+  const perPage = opts.perPage ?? 9;
+  const page = Math.max(1, opts.page ?? 1);
+  const query = (opts.q ?? "").trim();
+
+  const where: Record<string, unknown> = { isActive: true };
+  if (opts.category) where.categoryId = opts.category;
+  if (opts.inStock) where.quantityOnHand = { gt: 0 };
+  if (opts.minPrice != null || opts.maxPrice != null) {
+    where.sellPrice = {
+      ...(opts.minPrice != null ? { gte: opts.minPrice } : {}),
+      ...(opts.maxPrice != null ? { lte: opts.maxPrice } : {}),
+    };
+  }
+  if (query) {
+    where.OR = [
+      { name: { contains: query, mode: "insensitive" } },
+      { sku: { contains: query, mode: "insensitive" } },
+      { description: { contains: query, mode: "insensitive" } },
+    ];
+  }
+
+  const [total, products] = await Promise.all([
+    prisma.product.count({ where }),
+    prisma.product.findMany({
+      where,
+      orderBy: { name: "asc" },
+      include: { category: true, supplier: true },
+      skip: (page - 1) * perPage,
+      take: perPage,
+    }),
+  ]);
+
+  return {
+    rows: products.map(toRow),
+    total,
+    page,
+    perPage,
+    pageCount: Math.max(1, Math.ceil(total / perPage)),
+  };
 }
 
 export async function getCustomerOrders(userId: string) {

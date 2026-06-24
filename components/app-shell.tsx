@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Boxes, Search, Bell, LogOut } from "lucide-react";
+import { Boxes, Search, LogOut } from "lucide-react";
 
 import { navItems } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { logout } from "@/lib/actions/auth";
+import { NotificationBell, type NotificationItem } from "@/components/notification-bell";
 
 function isActive(pathname: string, href: string) {
   if (href === "/") return pathname === "/";
@@ -31,12 +32,20 @@ function initials(name: string) {
 
 export function AppShell({
   user,
+  notifications,
+  unread,
   children,
 }: {
   user: { name: string; role: string };
+  notifications: NotificationItem[];
+  unread: number;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  // The Users area is admin-only; hide it for non-admin staff.
+  const items = navItems.filter(
+    (item) => item.href !== "/settings/users" || user.role === "ADMIN",
+  );
 
   return (
     <div className="flex min-h-svh w-full">
@@ -49,7 +58,7 @@ export function AppShell({
           <span className="font-semibold tracking-tight">Inventory</span>
         </div>
         <nav className="flex flex-1 flex-col gap-0.5 p-3">
-          {navItems.map((item) => {
+          {items.map((item) => {
             const active = isActive(pathname, item.href);
             return (
               <Link
@@ -108,13 +117,7 @@ export function AppShell({
               className="pl-9"
             />
           </div>
-          <button
-            type="button"
-            aria-label="Notifications"
-            className="flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-          >
-            <Bell className="size-4" />
-          </button>
+          <NotificationBell items={notifications} unread={unread} />
         </header>
         <main className="flex-1 p-5 lg:p-8">{children}</main>
       </div>

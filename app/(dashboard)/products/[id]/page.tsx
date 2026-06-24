@@ -10,6 +10,8 @@ import {
 import { PageHeader } from "@/components/page-header";
 import { StockBadge } from "@/components/stock-badge";
 import { QuickAdjust } from "@/components/quick-adjust";
+import { DeleteProductButton } from "@/components/delete-product-button";
+import { ProductImage } from "@/components/product-image";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -75,9 +77,14 @@ export default async function ProductDetailPage({
       </Button>
 
       <PageHeader title={product.name} description={product.description}>
-        <Button variant="outline">
-          <Pencil /> Edit
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button asChild variant="outline">
+            <Link href={`/products/${product.id}/edit`}>
+              <Pencil /> Edit
+            </Link>
+          </Button>
+          <DeleteProductButton id={product.id} redirectTo="/products" />
+        </div>
       </PageHeader>
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -87,6 +94,11 @@ export default async function ProductDetailPage({
             <CardTitle>Stock on hand</CardTitle>
           </CardHeader>
           <CardContent>
+            <ProductImage
+              src={product.imageUrl}
+              alt={product.name}
+              className="mb-4 aspect-video w-full rounded-md border"
+            />
             <div className="flex items-end justify-between">
               <div className="text-4xl font-semibold tabular-nums">
                 <span data-testid="qoh">{formatNumber(product.quantityOnHand)}</span>

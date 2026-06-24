@@ -15,20 +15,31 @@ import {
 } from "@/components/ui/table";
 import { ProductSearch } from "@/components/product-search";
 import { CategoryFilter } from "@/components/category-filter";
-import { getProducts, getCategories, getActiveProductCount } from "@/lib/queries";
+import { ProductImage } from "@/components/product-image";
+import { Pagination } from "@/components/pagination";
+import { getProducts, getCategories } from "@/lib/queries";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 
 export default async function ProductsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; category?: string; filter?: string }>;
+  searchParams: Promise<{ q?: string; category?: string; filter?: string; page?: string }>;
 }) {
-  const { q = "", category = "", filter = "" } = await searchParams;
-  const [rows, categories, total] = await Promise.all([
-    getProducts({ q, category, filter }),
+  const { q = "", category = "", filter = "", page: pageStr } = await searchParams;
+  const page = Math.max(1, parseInt(pageStr ?? "1", 10) || 1);
+  const [{ rows, total, pageCount }, categories] = await Promise.all([
+    getProducts({ q, category, filter, page }),
     getCategories(),
-    getActiveProductCount(),
   ]);
+
+  const makeHref = (p: number) => {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    if (category) params.set("category", category);
+    if (filter) params.set("filter", filter);
+    params.set("page", String(p));
+    return `/products?${params.toString()}`;
+  };
 
   return (
     <div>
@@ -79,14 +90,23 @@ export default async function ProductsPage({
                 {rows.map((p) => (
                   <TableRow key={p.id}>
                     <TableCell>
-                      <Link
-                        href={`/products/${p.id}`}
-                        className="font-medium hover:underline"
-                      >
-                        {p.name}
-                      </Link>
-                      <div className="font-mono text-xs text-muted-foreground">
-                        {p.sku}
+                      <div className="flex items-center gap-3">
+                        <ProductImage
+                          src={p.imageUrl}
+                          alt={p.name}
+                          className="size-10 shrink-0 rounded-md border"
+                        />
+                        <div>
+                          <Link
+                            href={`/products/${p.id}`}
+                            className="font-medium hover:underline"
+                          >
+                            {p.name}
+                          </Link>
+                          <div className="font-mono text-xs text-muted-foreground">
+                            {p.sku}
+                          </div>
+                        </div>
                       </div>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
@@ -117,6 +137,8 @@ export default async function ProductsPage({
           )}
         </CardContent>
       </Card>
+
+      <Pagination page={page} pageCount={pageCount} makeHref={makeHref} />
 
       <p className="mt-3 text-xs text-muted-foreground">
         Showing {formatNumber(rows.length)} of {formatNumber(total)} products

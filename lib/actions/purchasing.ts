@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { applyMovement, nextDocNumber } from "@/lib/services/stock";
 import { checkWriter, requireWriter } from "@/lib/auth/session";
+import { UserError, toUserMessage } from "@/lib/errors";
 import type { ActionResult } from "@/lib/types";
 
 type LineItem = { productId: string; quantity: number; unitCost: number };
@@ -15,9 +16,9 @@ function parseItems(raw: string): LineItem[] {
   try {
     parsed = JSON.parse(raw || "[]");
   } catch {
-    throw new Error("Invalid line items.");
+    throw new UserError("Invalid line items.");
   }
-  if (!Array.isArray(parsed)) throw new Error("Invalid line items.");
+  if (!Array.isArray(parsed)) throw new UserError("Invalid line items.");
   const items = parsed
     .map((i) => ({
       productId: String((i as LineItem).productId ?? ""),
@@ -25,7 +26,7 @@ function parseItems(raw: string): LineItem[] {
       unitCost: Number((i as LineItem).unitCost ?? 0),
     }))
     .filter((i) => i.productId && i.quantity > 0);
-  if (items.length === 0) throw new Error("Add at least one line item.");
+  if (items.length === 0) throw new UserError("Add at least one line item.");
   return items;
 }
 
@@ -36,7 +37,7 @@ export async function createPurchaseOrder(formData: FormData) {
   const notes = String(formData.get("notes") ?? "").trim() || null;
   const items = parseItems(String(formData.get("items") ?? "[]"));
 
-  if (!supplierId) throw new Error("Select a supplier.");
+  if (!supplierId) throw new UserError("Select a supplier.");
 
   const poNumber = await nextDocNumber("PO");
   const po = await prisma.purchaseOrder.create({
@@ -66,14 +67,14 @@ export async function markPurchaseOrderOrdered(id: string): Promise<ActionResult
   if ("error" in auth) return { ok: false, error: auth.error };
   try {
     const po = await prisma.purchaseOrder.findUnique({ where: { id } });
-    if (!po) throw new Error("Purchase order not found.");
-    if (po.status !== "DRAFT") throw new Error("Only draft orders can be marked as ordered.");
+    if (!po) throw new UserError("Purchase order not found.");
+    if (po.status !== "DRAFT") throw new UserError("Only draft orders can be marked as ordered.");
     await prisma.purchaseOrder.update({
       where: { id },
       data: { status: "ORDERED", orderedAt: new Date() },
     });
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Failed." };
+    return { ok: false, error: toUserMessage(e) };
   }
   revalidatePath(`/purchase-orders/${id}`);
   revalidatePath("/purchase-orders");
@@ -90,9 +91,9 @@ export async function receivePurchaseOrder(id: string): Promise<ActionResult> {
         where: { id },
         include: { items: true },
       });
-      if (!po) throw new Error("Purchase order not found.");
-      if (po.status === "RECEIVED") throw new Error("This order has already been received.");
-      if (po.status === "CANCELLED") throw new Error("Cancelled orders cannot be received.");
+      if (!po) throw new UserError("Purchase order not found.");
+      if (po.status === "RECEIVED") throw new UserError("This order has already been received.");
+      if (po.status === "CANCELLED") throw new UserError("Cancelled orders cannot be received.");
 
       for (const item of po.items) {
         await applyMovement(tx, {
@@ -113,7 +114,7 @@ export async function receivePurchaseOrder(id: string): Promise<ActionResult> {
       });
     });
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Failed." };
+    return { ok: false, error: toUserMessage(e) };
   }
   revalidatePath(`/purchase-orders/${id}`);
   revalidatePath("/purchase-orders");
@@ -129,11 +130,11 @@ export async function cancelPurchaseOrder(id: string): Promise<ActionResult> {
   if ("error" in auth) return { ok: false, error: auth.error };
   try {
     const po = await prisma.purchaseOrder.findUnique({ where: { id } });
-    if (!po) throw new Error("Purchase order not found.");
-    if (po.status === "RECEIVED") throw new Error("Received orders cannot be cancelled.");
+    if (!po) throw new UserError("Purchase order not found.");
+    if (po.status === "RECEIVED") throw new UserError("Received orders cannot be cancelled.");
     await prisma.purchaseOrder.update({ where: { id }, data: { status: "CANCELLED" } });
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Failed." };
+    return { ok: false, error: toUserMessage(e) };
   }
   revalidatePath(`/purchase-orders/${id}`);
   revalidatePath("/purchase-orders");

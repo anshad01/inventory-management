@@ -5,7 +5,15 @@ import { redirect } from "next/navigation";
 
 import { prisma } from "@/lib/db";
 import { applyMovement, nextDocNumber } from "@/lib/services/stock";
-import { checkWriter, requireWriter } from "@/lib/auth/session";
+import { notify, notifyLowStock } from "@/lib/services/notify";
+import { checkWriter, getCurrentUser, requireWriter } from "@/lib/auth/session";
+import {
+  ORDER_STATUS_LABELS,
+  canTransition,
+  cancelRestoresStock,
+  type SaleStatus,
+} from "@/lib/orders";
+import { UserError, toUserMessage } from "@/lib/errors";
 import type { ActionResult } from "@/lib/types";
 
 type LineItem = { productId: string; quantity: number; unitPrice: number };
@@ -15,9 +23,9 @@ function parseItems(raw: string): LineItem[] {
   try {
     parsed = JSON.parse(raw || "[]");
   } catch {
-    throw new Error("Invalid line items.");
+    throw new UserError("Invalid line items.");
   }
-  if (!Array.isArray(parsed)) throw new Error("Invalid line items.");
+  if (!Array.isArray(parsed)) throw new UserError("Invalid line items.");
   const items = parsed
     .map((i) => ({
       productId: String((i as LineItem).productId ?? ""),
@@ -25,22 +33,12 @@ function parseItems(raw: string): LineItem[] {
       unitPrice: Number((i as LineItem).unitPrice ?? 0),
     }))
     .filter((i) => i.productId && i.quantity > 0);
-  if (items.length === 0) throw new Error("Add at least one line item.");
+  if (items.length === 0) throw new UserError("Add at least one line item.");
   return items;
 }
 
-/** Valid status transitions for admin */
-const TRANSITIONS: Record<string, string[]> = {
-  PENDING: ["CONFIRMED", "CANCELLED"],
-  CONFIRMED: ["SHIPPED", "CANCELLED"],
-  SHIPPED: ["DELIVERED", "CANCELLED"],
-  DELIVERED: [],
-  CANCELLED: [],
-  COMPLETED: ["VOIDED"],
-  VOIDED: [],
-};
-
-/** Record a completed sale: SALE_OUT movements that draw down stock. */
+/** Record an in-store sale made by staff: SALE_OUT movements that draw down
+ * stock. These are completed at the counter, so they land as DELIVERED. */
 export async function createSale(formData: FormData) {
   const actor = await requireWriter();
   const customerName = String(formData.get("customerName") ?? "").trim() || null;
@@ -55,7 +53,7 @@ export async function createSale(formData: FormData) {
         saleNumber,
         customerName,
         notes,
-        status: "COMPLETED",
+        status: "DELIVERED",
         createdById: actor.id,
         items: {
           create: items.map((i) => ({
@@ -77,23 +75,65 @@ export async function createSale(formData: FormData) {
         referenceId: created.id,
         createdById: actor.id,
       });
+      await notifyLowStock(tx, item.productId);
     }
     return created;
   });
 
   revalidatePath("/sales");
   revalidatePath("/products");
+  revalidatePath("/products/[id]", "page");
   revalidatePath("/");
   redirect(`/sales/${sale.id}`);
 }
 
-/** Advance an order to the next status â€” blocked if transition is invalid. */
-export async function advanceOrderStatus(
+/** Advance a customer order to the next state (CONFIRMED / SHIPPED / DELIVERED).
+ * Staff-only. Invalid transitions are rejected and the customer is notified. */
+export async function advanceOrder(
   id: string,
-  newStatus: string,
+  to: SaleStatus,
 ): Promise<ActionResult> {
   const auth = await checkWriter();
   if ("error" in auth) return { ok: false, error: auth.error };
+  if (to === "CANCELLED") return cancelOrder(id);
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const sale = await tx.sale.findUnique({
+        where: { id },
+        select: { id: true, status: true, saleNumber: true, customerUserId: true },
+      });
+      if (!sale) throw new UserError("Order not found.");
+      const from = sale.status as SaleStatus;
+      if (!canTransition(from, to)) {
+        throw new UserError(
+          `Cannot move order from ${ORDER_STATUS_LABELS[from]} to ${ORDER_STATUS_LABELS[to]}.`,
+        );
+      }
+      await tx.sale.update({ where: { id }, data: { status: to } });
+      if (sale.customerUserId) {
+        await notify(tx, {
+          userId: sale.customerUserId,
+          type: "ORDER_STATUS",
+          message: `Order ${sale.saleNumber} is now ${ORDER_STATUS_LABELS[to].toLowerCase()}.`,
+          href: `/shop/orders/${id}`,
+        });
+      }
+    });
+  } catch (e) {
+    return { ok: false, error: toUserMessage(e) };
+  }
+  revalidatePaths(id);
+  return { ok: true };
+}
+
+/** Cancel a customer order. Staff may cancel any order that is still
+ * PENDING/CONFIRMED; a customer may cancel their own order while it is PENDING.
+ * Cancelling restores the reserved stock (SPEC §5). */
+export async function cancelOrder(id: string): Promise<ActionResult> {
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "You are not signed in." };
+  const isStaffWriter = user.type === "STAFF" && user.role !== "VIEWER";
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -101,82 +141,65 @@ export async function advanceOrderStatus(
         where: { id },
         include: { items: true },
       });
-      if (!sale) throw new Error("Order not found.");
+      if (!sale) throw new UserError("Order not found.");
 
-      const allowed = TRANSITIONS[sale.status] ?? [];
-      if (!allowed.includes(newStatus)) {
-        throw new Error(
-          `Cannot move from ${sale.status} to ${newStatus}.`,
-        );
+      // Authorization: staff writer, or the owning customer.
+      const isOwner =
+        user.type === "CUSTOMER" && sale.customerUserId === user.id;
+      if (!isStaffWriter && !isOwner) {
+        throw new UserError("You cannot cancel this order.");
       }
 
-      // If cancelling, restore stock
-      if (newStatus === "CANCELLED") {
+      const from = sale.status as SaleStatus;
+      if (!canTransition(from, "CANCELLED")) {
+        throw new UserError(
+          `An order that is ${ORDER_STATUS_LABELS[from].toLowerCase()} can no longer be cancelled.`,
+        );
+      }
+      // Customers may only cancel while still pending.
+      if (isOwner && !isStaffWriter && from !== "PENDING") {
+        throw new UserError("This order can no longer be cancelled. Contact support.");
+      }
+
+      if (cancelRestoresStock(from)) {
         for (const item of sale.items) {
           await applyMovement(tx, {
             productId: item.productId,
             type: "ADJUSTMENT",
             quantity: Math.abs(item.quantity),
-            reason: `Cancelled order ${sale.saleNumber}`,
+            reason: `Cancelled ${sale.saleNumber}`,
             referenceType: "SALE",
             referenceId: sale.id,
-            createdById: auth.user.id,
+            createdById: user.id,
           });
         }
       }
 
-      await tx.sale.update({
-        where: { id },
-        data: { status: newStatus as any },
-      });
+      await tx.sale.update({ where: { id }, data: { status: "CANCELLED" } });
+
+      // Notify the customer if staff cancelled on their behalf.
+      if (sale.customerUserId && sale.customerUserId !== user.id) {
+        await notify(tx, {
+          userId: sale.customerUserId,
+          type: "ORDER_STATUS",
+          message: `Order ${sale.saleNumber} was cancelled.`,
+          href: `/shop/orders/${id}`,
+        });
+      }
     });
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Failed." };
+    return { ok: false, error: toUserMessage(e) };
   }
-
-  revalidatePath(`/sales/${id}`);
-  revalidatePath("/sales");
-  revalidatePath("/products");
-  revalidatePath("/");
+  revalidatePaths(id);
+  revalidatePath(`/shop/orders/${id}`);
+  revalidatePath("/shop/orders");
   return { ok: true };
 }
 
-/** Void a sale (legacy admin action for COMPLETED sales). */
-export async function voidSale(id: string): Promise<ActionResult> {
-  const auth = await checkWriter();
-  if ("error" in auth) return { ok: false, error: auth.error };
-  try {
-    await prisma.$transaction(async (tx) => {
-      const sale = await tx.sale.findUnique({
-        where: { id },
-        include: { items: true },
-      });
-      if (!sale) throw new Error("Sale not found.");
-      if (sale.status === "VOIDED") throw new Error("Already voided.");
-      if (!["COMPLETED", "PENDING", "CONFIRMED", "SHIPPED"].includes(sale.status)) {
-        throw new Error("Cannot void a delivered or cancelled order.");
-      }
-
-      for (const item of sale.items) {
-        await applyMovement(tx, {
-          productId: item.productId,
-          type: "ADJUSTMENT",
-          quantity: Math.abs(item.quantity),
-          reason: `Void ${sale.saleNumber}`,
-          referenceType: "SALE",
-          referenceId: sale.id,
-          createdById: auth.user.id,
-        });
-      }
-
-      await tx.sale.update({ where: { id }, data: { status: "VOIDED" } });
-    });
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Failed." };
-  }
+function revalidatePaths(id: string) {
   revalidatePath(`/sales/${id}`);
   revalidatePath("/sales");
   revalidatePath("/products");
+  revalidatePath("/products/[id]", "page");
   revalidatePath("/");
-  return { ok: true };
 }

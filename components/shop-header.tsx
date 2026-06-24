@@ -5,8 +5,17 @@ import { ShoppingCart, Package, LogOut } from "lucide-react";
 
 import { useCart } from "@/components/cart-context";
 import { logout } from "@/lib/actions/auth";
+import { NotificationBell, type NotificationItem } from "@/components/notification-bell";
 
-export function ShopHeader({ name }: { name: string }) {
+export function ShopHeader({
+  name,
+  notifications,
+  unread,
+}: {
+  name: string;
+  notifications: NotificationItem[];
+  unread: number;
+}) {
   const { count } = useCart();
 
   return (
@@ -37,6 +46,7 @@ export function ShopHeader({ name }: { name: string }) {
               </span>
             ) : null}
           </Link>
+          <NotificationBell items={notifications} unread={unread} />
           <span className="mx-2 hidden text-muted-foreground sm:inline">{name}</span>
           <form action={logout}>
             <button

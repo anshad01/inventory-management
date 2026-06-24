@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@prisma/client";
+import { UserError } from "@/lib/errors";
 
 type Tx = Prisma.TransactionClient;
 
@@ -45,8 +46,8 @@ export async function applyMovement(
         where: { id: input.productId },
         select: { quantityOnHand: true, name: true },
       });
-      if (!product) throw new Error("Product not found.");
-      throw new Error(
+      if (!product) throw new UserError("Product not found.");
+      throw new UserError(
         `Not enough stock for ${product.name}: ${product.quantityOnHand} on hand, ` +
           `cannot remove ${need}.`,
       );
@@ -56,7 +57,7 @@ export async function applyMovement(
       where: { id: input.productId },
       data: { quantityOnHand: { increment: delta } },
     });
-    if (res.count === 0) throw new Error("Product not found.");
+    if (res.count === 0) throw new UserError("Product not found.");
   }
 
   await tx.stockMovement.create({

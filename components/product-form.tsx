@@ -1,8 +1,13 @@
+"use client";
+
+import { useActionState } from "react";
 import Link from "next/link";
+import { Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, Select } from "@/components/ui/field";
+import type { ActionResult } from "@/lib/types";
 
 type Option = { id: string; name: string };
 
@@ -33,7 +38,10 @@ export function ProductForm({
   mode,
   cancelHref,
 }: {
-  action: (formData: FormData) => void | Promise<void>;
+  action: (
+    state: ActionResult | null,
+    formData: FormData,
+  ) => Promise<ActionResult>;
   categories: Option[];
   suppliers?: Option[];
   product?: ProductFormValues;
@@ -41,8 +49,9 @@ export function ProductForm({
   cancelHref: string;
 }) {
   const p = product ?? {};
+  const [state, formAction, pending] = useActionState(action, null);
   return (
-    <form action={action} className="grid gap-5 sm:grid-cols-2">
+    <form action={formAction} className="grid gap-5 sm:grid-cols-2">
       {mode === "create" ? (
         <Field label="SKU" htmlFor="sku">
           <Input id="sku" name="sku" required placeholder="KBD-MECH-87" defaultValue={p.sku} />
@@ -118,11 +127,20 @@ export function ProductForm({
         </Field>
       ) : null}
 
+      {state && !state.ok ? (
+        <p className="text-sm font-medium text-destructive sm:col-span-2">
+          {state.error}
+        </p>
+      ) : null}
+
       <div className="flex justify-end gap-2 sm:col-span-2">
         <Button asChild variant="outline" type="button">
           <Link href={cancelHref}>Cancel</Link>
         </Button>
-        <Button type="submit">{mode === "create" ? "Create product" : "Save changes"}</Button>
+        <Button type="submit" disabled={pending}>
+          {pending ? <Loader2 className="animate-spin" /> : null}
+          {mode === "create" ? "Create product" : "Save changes"}
+        </Button>
       </div>
     </form>
   );

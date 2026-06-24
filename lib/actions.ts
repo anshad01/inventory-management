@@ -7,6 +7,7 @@ import { prisma } from "@/lib/db";
 import { applyMovement } from "@/lib/services/stock";
 import { notifyLowStock } from "@/lib/services/notify";
 import { checkWriter, requireWriter } from "@/lib/auth/session";
+import { UserError, toUserMessage } from "@/lib/errors";
 import type { ActionResult } from "@/lib/types";
 
 // Server Actions = the write side of the backend. All stock changes go through
@@ -40,7 +41,7 @@ export async function adjustStock(
       await notifyLowStock(tx, productId);
     });
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Failed." };
+    return { ok: false, error: toUserMessage(e) };
   }
 
   revalidatePath(`/products/${productId}`);
@@ -56,7 +57,7 @@ export async function createSupplier(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim() || null;
   const phone = String(formData.get("phone") ?? "").trim() || null;
 
-  if (!name) throw new Error("Supplier name is required.");
+  if (!name) throw new UserError("Supplier name is required.");
 
   await prisma.supplier.create({ data: { name, email, phone } });
 

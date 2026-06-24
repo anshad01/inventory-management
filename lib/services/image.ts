@@ -4,6 +4,8 @@
 // ephemeral serverless hosts where the local filesystem isn't writable or
 // persistent. The trade-off is row size, so we cap the accepted file size.
 
+import { UserError } from "@/lib/errors";
+
 const MAX_BYTES = 1_000_000; // 1 MB
 const ALLOWED = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 
@@ -19,10 +21,10 @@ export async function fileToDataUrl(
   if (file.size === 0) return null;
 
   if (!ALLOWED.includes(file.type)) {
-    throw new Error("Image must be a PNG, JPEG, WebP, or GIF.");
+    throw new UserError("Image must be a PNG, JPEG, WebP, or GIF.");
   }
   if (file.size > MAX_BYTES) {
-    throw new Error("Image must be 1 MB or smaller.");
+    throw new UserError("Image must be 1 MB or smaller.");
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());

@@ -7,6 +7,7 @@ import { prisma } from "@/lib/db";
 import { applyMovement } from "@/lib/services/stock";
 import { fileToDataUrl } from "@/lib/services/image";
 import { checkProductManager } from "@/lib/auth/session";
+import { UserError, toUserMessage } from "@/lib/errors";
 import type { ActionResult } from "@/lib/types";
 
 // Product create / edit / delete (SPEC §3). Usable by STAFF writers and by
@@ -23,9 +24,17 @@ function homeFor(supplierScope: string | null): string {
   return supplierScope ? "/portal/products" : "/products";
 }
 
-export async function createProduct(formData: FormData) {
+// These two actions back the shared <ProductForm>, which drives them with
+// useActionState — so they take the previous state and return an ActionResult.
+// Validation problems come back as { ok: false, error } and render inline
+// (keeping the user's input); unexpected failures are sanitised by
+// toUserMessage so no Prisma/internal text ever reaches the form.
+export async function createProduct(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
   const auth = await checkProductManager();
-  if ("error" in auth) throw new Error(auth.error);
+  if ("error" in auth) return { ok: false, error: auth.error };
   const { user, supplierScope } = auth;
 
   const sku = String(formData.get("sku") ?? "").trim();
@@ -39,66 +48,75 @@ export async function createProduct(formData: FormData) {
   const reorderPoint = Math.trunc(parseNum(formData.get("reorderPoint")));
   const openingQty = Math.trunc(parseNum(formData.get("openingQty")));
 
-  if (!sku || !name) throw new Error("SKU and name are required.");
-  if (!categoryId) throw new Error("Please choose a category — every product must belong to one.");
+  if (!sku || !name) return { ok: false, error: "SKU and name are required." };
+  if (!categoryId)
+    return { ok: false, error: "Please choose a category — every product must belong to one." };
 
-  const imageUrl = await fileToDataUrl(formData.get("image"));
+  let productId: string;
+  try {
+    const imageUrl = await fileToDataUrl(formData.get("image"));
 
-  const existing = await prisma.product.findUnique({ where: { sku } });
-  if (existing) throw new Error(`A product with SKU "${sku}" already exists.`);
+    const existing = await prisma.product.findUnique({ where: { sku } });
+    if (existing) throw new UserError(`A product with SKU "${sku}" already exists.`);
 
-  const product = await prisma.product.create({
-    data: {
-      sku,
-      name,
-      description,
-      categoryId,
-      supplierId,
-      costPrice,
-      sellPrice,
-      reorderPoint,
-      quantityOnHand: 0,
-      imageUrl,
-    },
-  });
+    const product = await prisma.product.create({
+      data: {
+        sku,
+        name,
+        description,
+        categoryId,
+        supplierId,
+        costPrice,
+        sellPrice,
+        reorderPoint,
+        quantityOnHand: 0,
+        imageUrl,
+      },
+    });
+    productId = product.id;
 
-  if (openingQty > 0) {
-    await prisma.$transaction((tx) =>
-      applyMovement(tx, {
-        productId: product.id,
-        type: "PURCHASE_IN",
-        quantity: openingQty,
-        reason: "Opening stock",
-        referenceType: "MANUAL",
-        unitCost: costPrice,
-        createdById: user.id,
-      }),
-    );
+    if (openingQty > 0) {
+      await prisma.$transaction((tx) =>
+        applyMovement(tx, {
+          productId: product.id,
+          type: "PURCHASE_IN",
+          quantity: openingQty,
+          reason: "Opening stock",
+          referenceType: "MANUAL",
+          unitCost: costPrice,
+          createdById: user.id,
+        }),
+      );
+    }
+  } catch (e) {
+    return { ok: false, error: toUserMessage(e) };
   }
 
   revalidatePath("/products");
   revalidatePath("/portal/products");
   revalidatePath("/shop");
   revalidatePath("/");
-  redirect(`${homeFor(supplierScope)}/${product.id}`);
+  redirect(`${homeFor(supplierScope)}/${productId}`);
 }
 
 /** Load a product the current manager is allowed to edit, or throw. */
 async function loadOwn(id: string, supplierScope: string | null) {
   const product = await prisma.product.findUnique({ where: { id } });
-  if (!product) throw new Error("Product not found.");
+  if (!product) throw new UserError("Product not found.");
   if (supplierScope && product.supplierId !== supplierScope) {
-    throw new Error("You can only manage your own products.");
+    throw new UserError("You can only manage your own products.");
   }
   return product;
 }
 
-export async function updateProduct(id: string, formData: FormData) {
+export async function updateProduct(
+  id: string,
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
   const auth = await checkProductManager();
-  if ("error" in auth) throw new Error(auth.error);
+  if ("error" in auth) return { ok: false, error: auth.error };
   const { supplierScope } = auth;
-
-  await loadOwn(id, supplierScope);
 
   const name = String(formData.get("name") ?? "").trim();
   const categoryId = String(formData.get("categoryId") ?? "").trim();
@@ -107,26 +125,33 @@ export async function updateProduct(id: string, formData: FormData) {
   const sellPrice = parseNum(formData.get("sellPrice"));
   const reorderPoint = Math.trunc(parseNum(formData.get("reorderPoint")));
 
-  if (!name) throw new Error("Name is required.");
-  if (!categoryId) throw new Error("Please choose a category — every product must belong to one.");
+  if (!name) return { ok: false, error: "Name is required." };
+  if (!categoryId)
+    return { ok: false, error: "Please choose a category — every product must belong to one." };
 
-  const imageUrl = await fileToDataUrl(formData.get("image"));
+  try {
+    await loadOwn(id, supplierScope);
 
-  await prisma.product.update({
-    where: { id },
-    data: {
-      name,
-      categoryId,
-      description,
-      costPrice,
-      sellPrice,
-      reorderPoint,
-      // Only overwrite the image when a new one was uploaded.
-      ...(imageUrl ? { imageUrl } : {}),
-      // Suppliers can't reassign a product to another supplier.
-      ...(supplierScope ? {} : { supplierId: String(formData.get("supplierId") ?? "").trim() || null }),
-    },
-  });
+    const imageUrl = await fileToDataUrl(formData.get("image"));
+
+    await prisma.product.update({
+      where: { id },
+      data: {
+        name,
+        categoryId,
+        description,
+        costPrice,
+        sellPrice,
+        reorderPoint,
+        // Only overwrite the image when a new one was uploaded.
+        ...(imageUrl ? { imageUrl } : {}),
+        // Suppliers can't reassign a product to another supplier.
+        ...(supplierScope ? {} : { supplierId: String(formData.get("supplierId") ?? "").trim() || null }),
+      },
+    });
+  } catch (e) {
+    return { ok: false, error: toUserMessage(e) };
+  }
 
   revalidatePath("/products");
   revalidatePath(`/products/${id}`);
@@ -167,7 +192,7 @@ export async function deleteProduct(id: string): Promise<ActionResult> {
       await prisma.product.delete({ where: { id } });
     }
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Failed to delete." };
+    return { ok: false, error: toUserMessage(e, "Failed to delete.") };
   }
 
   revalidatePath("/products");

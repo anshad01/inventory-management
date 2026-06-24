@@ -1,12 +1,18 @@
+"use client";
+
+import { useState } from "react";
 import { ImageIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
 /**
- * Renders a product image (data URL or path) with a graceful icon fallback when
- * none is set. Plain <img> is used deliberately: sources are user-uploaded data
- * URLs and local SVGs, which don't benefit from next/image optimization and
- * would otherwise require remotePatterns config.
+ * Renders a product image (data URL, local SVG, or remote CDN photo) with a
+ * graceful icon fallback. The fallback shows both when no source is set and if
+ * the image fails to load at runtime (e.g. a remote photo 404s), so the UI
+ * never displays a broken-image glyph.
+ *
+ * Plain <img> is used deliberately: sources include user-uploaded data URLs,
+ * which don't benefit from next/image optimization.
  */
 export function ProductImage({
   src,
@@ -17,7 +23,9 @@ export function ProductImage({
   alt: string;
   className?: string;
 }) {
-  if (!src) {
+  const [failed, setFailed] = useState(false);
+
+  if (!src || failed) {
     return (
       <div
         className={cn(
@@ -32,6 +40,12 @@ export function ProductImage({
   }
   return (
     // eslint-disable-next-line @next/next/no-img-element
-    <img src={src} alt={alt} className={cn("object-cover", className)} />
+    <img
+      src={src}
+      alt={alt}
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className={cn("object-cover", className)}
+    />
   );
 }

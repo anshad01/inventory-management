@@ -13,6 +13,7 @@ import {
   cancelRestoresStock,
   type SaleStatus,
 } from "@/lib/orders";
+import { UserError, toUserMessage } from "@/lib/errors";
 import type { ActionResult } from "@/lib/types";
 
 type LineItem = { productId: string; quantity: number; unitPrice: number };
@@ -22,9 +23,9 @@ function parseItems(raw: string): LineItem[] {
   try {
     parsed = JSON.parse(raw || "[]");
   } catch {
-    throw new Error("Invalid line items.");
+    throw new UserError("Invalid line items.");
   }
-  if (!Array.isArray(parsed)) throw new Error("Invalid line items.");
+  if (!Array.isArray(parsed)) throw new UserError("Invalid line items.");
   const items = parsed
     .map((i) => ({
       productId: String((i as LineItem).productId ?? ""),
@@ -32,7 +33,7 @@ function parseItems(raw: string): LineItem[] {
       unitPrice: Number((i as LineItem).unitPrice ?? 0),
     }))
     .filter((i) => i.productId && i.quantity > 0);
-  if (items.length === 0) throw new Error("Add at least one line item.");
+  if (items.length === 0) throw new UserError("Add at least one line item.");
   return items;
 }
 
@@ -102,10 +103,10 @@ export async function advanceOrder(
         where: { id },
         select: { id: true, status: true, saleNumber: true, customerUserId: true },
       });
-      if (!sale) throw new Error("Order not found.");
+      if (!sale) throw new UserError("Order not found.");
       const from = sale.status as SaleStatus;
       if (!canTransition(from, to)) {
-        throw new Error(
+        throw new UserError(
           `Cannot move order from ${ORDER_STATUS_LABELS[from]} to ${ORDER_STATUS_LABELS[to]}.`,
         );
       }
@@ -120,7 +121,7 @@ export async function advanceOrder(
       }
     });
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Failed." };
+    return { ok: false, error: toUserMessage(e) };
   }
   revalidatePaths(id);
   return { ok: true };
@@ -140,24 +141,24 @@ export async function cancelOrder(id: string): Promise<ActionResult> {
         where: { id },
         include: { items: true },
       });
-      if (!sale) throw new Error("Order not found.");
+      if (!sale) throw new UserError("Order not found.");
 
       // Authorization: staff writer, or the owning customer.
       const isOwner =
         user.type === "CUSTOMER" && sale.customerUserId === user.id;
       if (!isStaffWriter && !isOwner) {
-        throw new Error("You cannot cancel this order.");
+        throw new UserError("You cannot cancel this order.");
       }
 
       const from = sale.status as SaleStatus;
       if (!canTransition(from, "CANCELLED")) {
-        throw new Error(
+        throw new UserError(
           `An order that is ${ORDER_STATUS_LABELS[from].toLowerCase()} can no longer be cancelled.`,
         );
       }
       // Customers may only cancel while still pending.
       if (isOwner && !isStaffWriter && from !== "PENDING") {
-        throw new Error("This order can no longer be cancelled. Contact support.");
+        throw new UserError("This order can no longer be cancelled. Contact support.");
       }
 
       if (cancelRestoresStock(from)) {
@@ -187,7 +188,7 @@ export async function cancelOrder(id: string): Promise<ActionResult> {
       }
     });
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Failed." };
+    return { ok: false, error: toUserMessage(e) };
   }
   revalidatePaths(id);
   revalidatePath(`/shop/orders/${id}`);

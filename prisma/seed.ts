@@ -19,7 +19,29 @@ const users = [
   { id: "u_customer", email: "customer@example.com", name: "Jordan Smith", type: "CUSTOMER" as const, role: "VIEWER" as const, supplierId: null, isApproved: true },
 ];
 
-// Each product picks up a relevant placeholder image based on its category.
+// Real product photos (Unsplash CDN). Each id below was verified to resolve;
+// the `u()` helper applies consistent sizing/format params. If a product has no
+// specific photo we fall back to the category SVG, then a generic placeholder —
+// so the catalog always renders something sensible even offline.
+const u = (id: string) =>
+  `https://images.unsplash.com/photo-${id}?auto=format&fit=crop&w=800&q=80`;
+
+const productImage: Record<string, string> = {
+  p_001: u("1587829741301-dc798b83add3"), // mechanical keyboard
+  p_002: u("1618384887929-16ec33fab9ef"), // slim wireless keyboard
+  p_003: u("1527814050087-3793815479db"), // wireless mouse
+  p_004: u("1615663245857-ac93bb7c39e7"), // RGB gaming mouse
+  p_005: u("1527443224154-c4a3942d3acf"), // QHD monitor
+  p_006: u("1517336714731-489689fd1ca8"), // FHD monitor
+  p_007: u("1599669454699-248893623440"), // USB headset
+  p_008: u("1618366712010-f4ae9c647dcb"), // wireless headset
+  p_009: u("1623949556303-b0d17d198863"), // webcam
+  p_010: u("1531492746076-161ca9bcad58"), // portable SSD
+  p_011: u("1625842268584-8f3296236761"), // USB-C hub
+  p_012: u("1558618666-fcd25c85cd64"), //   HDMI cable
+};
+
+// Category-level SVG fallbacks (bundled locally, always available).
 const categoryImage: Record<string, string> = {
   cat_keyboards: "/img/categories/keyboards.svg",
   cat_mice: "/img/categories/mice.svg",
@@ -103,7 +125,10 @@ async function main() {
   await prisma.product.createMany({
     data: products.map((p) => ({
       ...p,
-      imageUrl: categoryImage[p.categoryId] ?? "/img/categories/placeholder.svg",
+      imageUrl:
+        productImage[p.id] ??
+        categoryImage[p.categoryId] ??
+        "/img/categories/placeholder.svg",
     })),
   });
   await prisma.stockMovement.createMany({ data: movements });

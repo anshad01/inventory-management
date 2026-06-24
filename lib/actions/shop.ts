@@ -7,6 +7,7 @@ import { applyMovement, nextDocNumber } from "@/lib/services/stock";
 import { notify, notifyLowStock } from "@/lib/services/notify";
 import { requireCustomer } from "@/lib/auth/session";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { toUserMessage } from "@/lib/errors";
 
 type CartLine = { id: string; qty: number };
 
@@ -91,6 +92,6 @@ export async function checkout(lines: CartLine[]): Promise<CheckoutResult> {
     revalidatePath("/");
     return { ok: true, orderId };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Checkout failed." };
+    return { ok: false, error: toUserMessage(e, "Checkout failed. Please try again.") };
   }
 }

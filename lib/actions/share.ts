@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/db";
 import { checkWriter, requireWriter } from "@/lib/auth/session";
+import { UserError, toUserMessage } from "@/lib/errors";
 import type { ActionResult } from "@/lib/types";
 
 type Scope = "FULL_INVENTORY" | "LOW_STOCK" | "CATEGORY";
@@ -17,7 +18,7 @@ export async function createShareLink(formData: FormData) {
   const scope = String(formData.get("scope") ?? "FULL_INVENTORY") as Scope;
   const categoryId = String(formData.get("categoryId") ?? "").trim() || null;
 
-  if (!title) throw new Error("Title is required.");
+  if (!title) throw new UserError("Title is required.");
 
   await prisma.shareLink.create({
     data: {
@@ -39,7 +40,7 @@ export async function revokeShareLink(id: string): Promise<ActionResult> {
   try {
     await prisma.shareLink.update({ where: { id }, data: { isActive: false } });
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Failed." };
+    return { ok: false, error: toUserMessage(e) };
   }
   revalidatePath("/share");
   return { ok: true };

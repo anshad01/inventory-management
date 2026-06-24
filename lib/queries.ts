@@ -36,7 +36,6 @@ type ProductWithRelations = {
   reorderPoint: number;
   unit: string;
   isActive: boolean;
-  imageUrl: string | null;
   updatedAt: Date;
   imageUrl: string | null;
   category?: { name: string } | null;
@@ -62,7 +61,6 @@ function toRow(p: ProductWithRelations): ProductRow {
     updatedAt: p.updatedAt.toISOString(),
     categoryName: p.category?.name ?? null,
     supplierName: p.supplier?.name ?? null,
-    imageUrl: (p as any).imageUrl ?? null,
   };
 }
 
@@ -801,3 +799,4 @@ export async function getShareSnapshot(token: string) {
     products,
   };
 }
+
